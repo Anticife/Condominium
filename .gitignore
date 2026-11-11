@@ -1,0 +1,28 @@
+# Dependencias
+node_modules/
+.pnp
+.pnp.js
+
+# Firebase local
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+
+# Secretos y credenciales (ESTRICTAMENTE PROHIBIDOS)
+.env
+.env.local
+.env.*.local
+serviceAccount*.json
+*.pem
+
+# Builds y compilados
+dist/
+build/
+lib/
+
+# Temporales de IDEs y SO
+.DS_Store
+.idea/
+.vscode/
+*.log
