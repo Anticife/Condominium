@@ -33,10 +33,6 @@ jobs:
           npm ci
           npm run build
 
-      - name: Desplegar a Firebase
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CONDOMINIUM_F6236 }}
-          channelId: live
-          projectId: condominium-f6236
+      - name: Desplegar todo a Firebase (Hosting, Functions, Rules)
+        run: |
+          npx --yes firebase-tools deploy --only hosting,firestore,functions --token "${{ secrets.FIREBASE_TOKEN }}" --project condominium-f6236
