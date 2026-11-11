@@ -33,6 +33,6 @@ jobs:
           npm ci
           npm run build
 
-      - name: Desplegar todo a Firebase (Hosting, Functions, Rules)
+      - name: Desplegar a Firebase (Hosting y Firestore)
         run: |
-          npx --yes firebase-tools deploy --only hosting,firestore,functions --token "${{ secrets.FIREBASE_TOKEN }}" --project condominium-f6236
+          npx --yes firebase-tools deploy --only hosting,firestore --token "${{ secrets.FIREBASE_TOKEN }}" --project condominium-f6236
