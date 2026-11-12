@@ -1,18 +1,156 @@
-rules_version='2'
+rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2026, 12, 11);
+
+    // ==========================================
+    // FUNCIONES HELPER GLOBALES DE AUTORIZACIÓN
+    // ==========================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && getUserData().role == role;
+    }
+
+    function isSelf(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ==========================================
+    // COLECCIÓN: USUARIOS (users/{userId})
+    // ==========================================
+    match /users/{userId} {
+      allow read: if isSelf(userId) || hasRole('administradora');
+      // Registro inicial o creación por administradora; el rol por defecto es 'residente'
+      allow create: if hasRole('administradora') || (isAuthenticated() && !exists(/databases/$(database)/documents/users/$(request.auth.uid)) && request.resource.data.role == 'residente');
+      // No se permite auto-elevar privilegios ni cambiar estado activo
+      allow update: if hasRole('administradora') || (isSelf(userId) && request.resource.data.role == resource.data.role && request.resource.data.isActive == resource.data.isActive);
+      allow delete: if false;
+    }
+
+    // ==========================================
+    // COLECCIÓN: TORRES Y APARTAMENTOS (CENSO)
+    // ==========================================
+    match /towers/{towerId} {
+      allow read: if isAuthenticated();
+      allow write: if hasRole('administradora');
+    }
+
+    match /apartments/{apartmentId} {
+      allow read: if hasRole('administradora') || hasRole('portero') || (hasRole('residente') && request.auth.uid in resource.data.residentUids);
+      allow write: if hasRole('administradora');
+
+      // Subcolección de personas autorizadas (RN-B4, RN-B7 - Habeas Data)
+      match /authorized/{authId} {
+        allow read: if hasRole('administradora') || hasRole('portero') || (hasRole('residente') && request.auth.uid in get(/databases/$(database)/documents/apartments/$(apartmentId)).data.residentUids);
+        allow write: if hasRole('administradora') || (hasRole('residente') && request.auth.uid in get(/databases/$(database)/documents/apartments/$(apartmentId)).data.residentUids);
+      }
+    }
+
+    // ==========================================
+    // COLECCIÓN: PAQUETERÍA (packages/{packageId})
+    // ==========================================
+    match /packages/{packageId} {
+      // Lectura: Porteros/Admin ven todo; Residentes solo ven los de su propio apartamento (RN-B7)
+      allow read: if hasRole('portero') || hasRole('administradora') || (hasRole('residente') && resource.data.apartmentId == getUserData().unitId);
+      
+      // Creación: Solo portero o administradora; siempre inicia 'Pendiente' con timestamp del servidor
+      allow create: if (hasRole('portero') || hasRole('administradora'))
+        && request.resource.data.status == 'Pendiente'
+        && request.resource.data.receivedByPorteroId == request.auth.uid
+        && request.resource.data.receivedAt == request.time
+        && request.resource.data.apartmentId is string
+        && request.resource.data.recipientName is string;
+
+      // Entrega (RN-B4): Solo portero o administradora; pasa de 'Pendiente' a 'Entregado'
+      allow update: if (hasRole('portero') || hasRole('administradora'))
+        && resource.data.status == 'Pendiente'
+        && request.resource.data.status == 'Entregado'
+        && request.resource.data.deliveredAt == request.time
+        && request.resource.data.deliveredByPorteroId == request.auth.uid
+        && request.resource.data.deliveredToPerson is string
+        && request.resource.data.receivedAt == resource.data.receivedAt
+        && request.resource.data.receivedByPorteroId == resource.data.receivedByPorteroId
+        && request.resource.data.apartmentId == resource.data.apartmentId;
+
+      allow delete: if false;
+    }
+
+    // ==========================================
+    // COLECCIÓN: RESERVAS (reservations/{resId})
+    // RN-B1 (Cruces), RN-B2 (48h), RN-B3 (1/mes)
+    // ==========================================
+    match /reservations/{reservationId} {
+      allow read: if isAuthenticated();
+      
+      // Solicitud: Residente solicita para su propio apto con mín 48 horas de anticipación (RN-B2)
+      allow create: if hasRole('residente')
+        && request.resource.data.status == 'Pendiente'
+        && request.resource.data.residentId == request.auth.uid
+        && request.resource.data.apartmentId == getUserData().unitId
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.startTime >= request.time + duration.value(48, 'h')
+        && request.resource.data.endTime > request.resource.data.startTime
+        && (request.resource.data.commonArea in ['salon_social', 'bbq']);
+
+      // Resolución: Solo administradora aprueba o rechaza; rechazo exige motivo >= 5 caracteres
+      allow update: if hasRole('administradora')
+        && resource.data.status == 'Pendiente'
+        && (request.resource.data.status in ['Aprobada', 'Rechazada'])
+        && (request.resource.data.status != 'Rechazada' || (request.resource.data.rejectionReason is string && request.resource.data.rejectionReason.size() >= 5))
+        && request.resource.data.resolvedAt == request.time
+        && request.resource.data.resolvedBy == request.auth.uid
+        && request.resource.data.startTime == resource.data.startTime
+        && request.resource.data.endTime == resource.data.endTime
+        && request.resource.data.commonArea == resource.data.commonArea
+        && request.resource.data.apartmentId == resource.data.apartmentId;
+
+      allow delete: if false;
+    }
+
+    // ==========================================
+    // CONTADORES Y RADICACIÓN (counters/pqrs)
+    // ==========================================
+    match /counters/pqrs {
+      allow read: if isAuthenticated();
+      // Solo permite incremento de exactamente +1
+      allow update: if isAuthenticated() && request.resource.data.sequence == resource.data.sequence + 1;
+    }
+
+    // ==========================================
+    // COLECCIÓN: PQRS (pqrs/{pqrsId})
+    // RN-B6 (Respuesta oficial e historial inmutable)
+    // ==========================================
+    match /pqrs/{pqrsId} {
+      allow read: if hasRole('administradora') || (hasRole('residente') && resource.data.apartmentId == getUserData().unitId);
+      
+      allow create: if hasRole('residente')
+        && request.resource.data.status == 'Radicada'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.residentId == request.auth.uid
+        && request.resource.data.apartmentId == getUserData().unitId;
+
+      allow update: if hasRole('administradora')
+        && ((request.resource.data.status == 'En gestión' && resource.data.status == 'Radicada')
+            || (request.resource.data.status == 'Resuelta'
+                && request.resource.data.officialResponse is string
+                && request.resource.data.officialResponse.size() >= 10))
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+
+      // Subcolección de auditoría de estados
+      match /history/{historyId} {
+        allow read: if hasRole('administradora') || (hasRole('residente') && get(/databases/$(database)/documents/pqrs/$(pqrsId)).data.apartmentId == getUserData().unitId);
+        allow create: if hasRole('administradora') && request.resource.data.changedAt == request.time;
+        allow update, delete: if false;
+      }
     }
   }
 }
