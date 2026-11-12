@@ -233,11 +233,11 @@ export default function GuardTerminal({ state, onAddPackage, onDeliverPackage })
             <div style={{ marginBottom: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label className="cds-input-label">2. NÚMERO DE APARTAMENTO</label>
-                {matchedApt && (
+                {matchedApt && matchedApt.ownerName ? (
                   <span style={{ fontSize: '11px', color: '#0f62fe', fontWeight: 500 }}>
                     {matchedApt.ownerName}
                   </span>
-                )}
+                ) : null}
               </div>
               <input
                 type="text"
@@ -314,7 +314,7 @@ export default function GuardTerminal({ state, onAddPackage, onDeliverPackage })
                 <input
                   type="text"
                   className="cds-input"
-                  placeholder={matchedApt ? matchedApt.ownerName : 'Destinatario'}
+                  placeholder={matchedApt?.ownerName || 'Destinatario'}
                   value={customRecipient}
                   onChange={(e) => setCustomRecipient(e.target.value)}
                 />

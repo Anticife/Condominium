@@ -41,8 +41,19 @@ export default function ResidentPortal({
   const [pqrsDescription, setPqrsDescription] = useState('');
   const [pqrsSuccess, setPqrsSuccess] = useState(null);
 
-  // Get active apartment details
-  const myApartment = state.apartments.find(a => a.id === activeAptId) || state.apartments[0];
+  // Get active apartment details with defensive fallback
+  const defaultFallbackApt = {
+    id: activeAptId || 'T1-101',
+    towerId: (activeAptId && activeAptId.split('-')[0]) || 'T1',
+    towerName: 'Torre 1',
+    number: (activeAptId && activeAptId.split('-')[1]) || '101',
+    ownerName: currentUser?.name || 'Carlos Rodríguez',
+    email: currentUser?.email || 'carlos.rodriguez@altosparque.com',
+    phone: '3101234567',
+    residents: [],
+    authorized: []
+  };
+  const myApartment = state.apartments?.find(a => a.id === activeAptId) || state.apartments?.[0] || defaultFallbackApt;
 
   // Filter packages for this resident (RN-B7 compliance)
   const myPackages = state.packages.filter(p => p.apartmentId === myApartment.id);
@@ -674,27 +685,35 @@ export default function ResidentPortal({
                   </tr>
                 </thead>
                 <tbody>
-                  {myApartment.authorized.map(person => (
-                    <tr key={person.id}>
-                      <td style={{ fontWeight: 600 }}>{person.name}</td>
-                      <td className="font-mono">{person.doc}</td>
-                      <td className="font-mono">{person.phone}</td>
-                      <td>
-                        <span className="cds-tag cds-tag-blue">{person.relation}</span>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="cds-btn cds-btn-ghost"
-                          style={{ padding: '4px 8px', height: '28px', color: '#da1e28' }}
-                          onClick={() => onRemoveAuthorized(myApartment.id, person.id)}
-                        >
-                          <Trash2 size={14} />
-                          <span>Revocar</span>
-                        </button>
+                  {!myApartment.authorized || myApartment.authorized.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" style={{ textAlign: 'center', padding: '24px', color: '#8d8d8d' }}>
+                        No tiene personas autorizadas registradas para su apartamento. Use el formulario superior para habilitar un receptor.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    myApartment.authorized.map(person => (
+                      <tr key={person.id}>
+                        <td style={{ fontWeight: 600 }}>{person.name}</td>
+                        <td className="font-mono">{person.doc}</td>
+                        <td className="font-mono">{person.phone}</td>
+                        <td>
+                          <span className="cds-tag cds-tag-blue">{person.relation}</span>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="cds-btn cds-btn-ghost"
+                            style={{ padding: '4px 8px', height: '28px', color: '#da1e28' }}
+                            onClick={() => onRemoveAuthorized(myApartment.id, person.id)}
+                          >
+                            <Trash2 size={14} />
+                            <span>Revocar</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

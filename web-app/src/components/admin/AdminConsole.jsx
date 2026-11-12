@@ -11,7 +11,8 @@ import {
   CheckCircle2, 
   TrendingUp,
   FileSpreadsheet,
-  Printer
+  Printer,
+  Trash2
 } from 'lucide-react';
 import BoardReportModal from './BoardReportModal';
 import CensusUploadModal from './CensusUploadModal';
@@ -20,7 +21,8 @@ export default function AdminConsole({
   state, 
   onResolveReservation, 
   onTransitionPqrs, 
-  onImportCensusBatch 
+  onImportCensusBatch,
+  onResetData
 }) {
   const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'reservations' | 'pqrs' | 'census'
 
@@ -225,15 +227,29 @@ export default function AdminConsole({
               </div>
             </div>
 
-            <button
-              type="button"
-              className="cds-btn cds-btn-primary"
-              style={{ height: '36px', fontSize: '12px' }}
-              onClick={() => setIsReportModalOpen(true)}
-            >
-              <Printer size={15} />
-              <span>Generar Informe Ejecutivo para el Consejo (SCRUM-41)</span>
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {onResetData && (
+                <button
+                  type="button"
+                  className="cds-btn cds-btn-danger"
+                  style={{ height: '36px', fontSize: '12px' }}
+                  onClick={onResetData}
+                  title="Eliminar todos los datos de prueba y restablecer estado limpio"
+                >
+                  <Trash2 size={15} />
+                  <span>Purgar Datos de Prueba</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="cds-btn cds-btn-primary"
+                style={{ height: '36px', fontSize: '12px' }}
+                onClick={() => setIsReportModalOpen(true)}
+              >
+                <Printer size={15} />
+                <span>Generar Informe Ejecutivo para el Consejo (SCRUM-41)</span>
+              </button>
+            </div>
           </div>
 
           {/* Executive KPI Cards Grid */}
@@ -395,8 +411,15 @@ export default function AdminConsole({
                 </tr>
               </thead>
               <tbody>
-                {state.reservations.map(res => (
-                  <tr key={res.id}>
+                {state.reservations.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" style={{ textAlign: 'center', padding: '36px', color: '#8d8d8d' }}>
+                      No hay solicitudes de reservas registradas en el sistema.
+                    </td>
+                  </tr>
+                ) : (
+                  state.reservations.map(res => (
+                    <tr key={res.id}>
                     <td className="font-mono" style={{ fontWeight: 600 }}>{res.id}</td>
                     <td>
                       <div><strong>{res.apartmentId}</strong></div>
@@ -456,7 +479,7 @@ export default function AdminConsole({
                       )}
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>
@@ -481,8 +504,14 @@ export default function AdminConsole({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {state.pqrs.map(ticket => (
-              <div key={ticket.id} className="cds-tile" style={{ backgroundColor: '#ffffff' }}>
+            {state.pqrs.length === 0 ? (
+              <div className="cds-tile" style={{ textAlign: 'center', padding: '48px', color: '#8d8d8d', backgroundColor: '#ffffff' }}>
+                <FileCheck size={32} style={{ margin: '0 auto 10px', display: 'block', opacity: 0.5 }} />
+                No hay radicados PQRS registrados en el sistema.
+              </div>
+            ) : (
+              state.pqrs.map(ticket => (
+                <div key={ticket.id} className="cds-tile" style={{ backgroundColor: '#ffffff' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                   <div>
                     <span className="cds-tag cds-tag-dark font-mono">{ticket.ticketNumber}</span>
@@ -562,7 +591,7 @@ export default function AdminConsole({
                   </div>
                 )}
               </div>
-            ))}
+            )))}
           </div>
         </div>
       )}
@@ -671,20 +700,34 @@ export default function AdminConsole({
                 </tr>
               </thead>
               <tbody>
-                {filteredApartments.slice(0, 50).map(apt => (
-                  <tr key={apt.id}>
-                    <td className="font-mono" style={{ fontWeight: 600 }}>{apt.id}</td>
-                    <td>{apt.towerName}</td>
-                    <td><strong>{apt.ownerName}</strong></td>
-                    <td className="font-mono" style={{ fontSize: '12px' }}>{apt.email}</td>
-                    <td className="font-mono">{apt.phone}</td>
-                    <td>
-                      <span className="cds-tag cds-tag-blue">
-                        {apt.authorized ? apt.authorized.length : 0} personas
-                      </span>
+                {filteredApartments.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#8d8d8d' }}>
+                      No hay apartamentos que coincidan con los filtros aplicados.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredApartments.slice(0, 50).map(apt => (
+                    <tr key={apt.id}>
+                      <td className="font-mono" style={{ fontWeight: 600 }}>{apt.id}</td>
+                      <td>{apt.towerName}</td>
+                      <td>
+                        {apt.ownerName ? (
+                          <strong>{apt.ownerName}</strong>
+                        ) : (
+                          <span style={{ color: '#8d8d8d', fontStyle: 'italic' }}>Sin asignar (Pendiente Censo)</span>
+                        )}
+                      </td>
+                      <td className="font-mono" style={{ fontSize: '12px' }}>{apt.email || '—'}</td>
+                      <td className="font-mono">{apt.phone || '—'}</td>
+                      <td>
+                        <span className={`cds-tag ${apt.authorized && apt.authorized.length > 0 ? 'cds-tag-blue' : 'cds-tag-gray'}`}>
+                          {apt.authorized ? apt.authorized.length : 0} personas
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

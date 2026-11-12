@@ -4,7 +4,7 @@ import GuardTerminal from './components/guard/GuardTerminal';
 import ResidentPortal from './components/resident/ResidentPortal';
 import AdminConsole from './components/admin/AdminConsole';
 import LoginModal, { PRESET_USERS } from './components/auth/LoginModal';
-import { loadCondominiumState, saveCondominiumState } from './data/condominiumData';
+import { loadCondominiumState, saveCondominiumState, resetCondominiumState } from './data/condominiumData';
 import { 
   probeBackendStatus,
   bridgeRegisterPackage,
@@ -79,7 +79,13 @@ export default function App() {
     try {
       const unsubscribe = bridgeSubscribePendingPackages(
         (firestorePkgs) => {
-          if (!firestorePkgs || firestorePkgs.length === 0) return;
+          if (!firestorePkgs || firestorePkgs.length === 0) {
+            setCondoState(prev => ({
+              ...prev,
+              packages: prev.packages.filter(p => !p.id?.startsWith('PKG-2026-'))
+            }));
+            return;
+          }
           setCondoState(prev => {
             // Merge firestore packages with local packages
             const newMapped = firestorePkgs.map(fp => ({
@@ -100,10 +106,10 @@ export default function App() {
               receiverDocumentId: fp.deliveredToDocument || null
             }));
 
-            // Preserve local non-pending packages or local mock ones
+            // Filter out any legacy mock packages
             const merged = [...newMapped];
             prev.packages.forEach(lp => {
-              if (!merged.some(m => m.id === lp.id)) {
+              if (!merged.some(m => m.id === lp.id) && !lp.id?.startsWith('PKG-2026-')) {
                 merged.push(lp);
               }
             });
@@ -346,6 +352,13 @@ export default function App() {
     }
   };
 
+  // Handler: Reset / Purge all mock and local test data
+  const handleResetData = () => {
+    const clean = resetCondominiumState();
+    setCondoState(clean);
+    showToast('info', '✔ Todos los datos de prueba han sido eliminados. El sistema se encuentra limpio.');
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* IBM Carbon Masthead */}
@@ -423,6 +436,7 @@ export default function App() {
             onResolveReservation={handleResolveReservation}
             onTransitionPqrs={handleTransitionPqrs}
             onImportCensusBatch={handleSeedCensus}
+            onResetData={handleResetData}
           />
         )}
       </main>
