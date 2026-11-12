@@ -1,10 +1,14 @@
 rules_version = '2';
 
+// Mi Conjunto en Línea — reglas de seguridad (plan Spark, sin Cloud Functions).
+// Todas las reglas de negocio se validan aquí y en transacciones del cliente.
+// Todo lo que no tenga un `match` explícito queda denegado por defecto.
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
     // ==========================================
-    // FUNCIONES HELPER GLOBALES DE AUTORIZACIÓN
+    // FUNCIONES HELPER GLOBALES (SCRUM-6)
     // ==========================================
     function isAuthenticated() {
       return request.auth != null;
@@ -14,108 +18,291 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // Un usuario desactivado (RF-02) pierde todos sus permisos.
     function hasRole(role) {
-      return isAuthenticated() && getUserData().role == role;
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && getUserData().role == role
+        && getUserData().isActive == true;
     }
 
     function isSelf(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function myUnitId() {
+      return getUserData().get('unitId', null);
+    }
+
+    function isResidentOf(apartmentId) {
+      return hasRole('residente') && myUnitId() == apartmentId;
+    }
+
+    function changesOnly(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    function isNonEmptyString(value) {
+      return value is string && value.size() > 0;
+    }
+
+    function apartmentPath(apartmentId) {
+      return /databases/$(database)/documents/apartments/$(apartmentId);
+    }
+
     // ==========================================
-    // COLECCIÓN: USUARIOS (users/{userId})
+    // USUARIOS (users/{userId}) — SCRUM-6
     // ==========================================
     match /users/{userId} {
       allow read: if isSelf(userId) || hasRole('administradora');
-      // Registro inicial o creación por administradora; el rol por defecto es 'residente'
-      allow create: if hasRole('administradora') || (isAuthenticated() && !exists(/databases/$(database)/documents/users/$(request.auth.uid)) && request.resource.data.role == 'residente');
-      // No se permite auto-elevar privilegios ni cambiar estado activo
-      allow update: if hasRole('administradora') || (isSelf(userId) && request.resource.data.role == resource.data.role && request.resource.data.isActive == resource.data.isActive);
+
+      // Autorregistro: siempre como residente, activo y SIN apartamento.
+      // La administradora asigna unitId/towerId después.
+      allow create: if hasRole('administradora')
+        || (isSelf(userId)
+            && request.resource.data.keys().hasOnly(['uid', 'email', 'displayName', 'phone', 'role', 'isActive', 'createdAt'])
+            && request.resource.data.uid == userId
+            && request.resource.data.role == 'residente'
+            && request.resource.data.isActive == true
+            && request.resource.data.createdAt == request.time);
+
+      // El usuario solo edita sus datos de contacto: nunca rol, estado,
+      // apartamento ni torre (si pudiera cambiar unitId vería paquetes,
+      // reservas y PQRS de otro apartamento).
+      // La administradora no puede cambiarse su propio rol ni desactivarse.
+      allow update: if (isSelf(userId) && changesOnly(['displayName', 'phone']))
+        || (hasRole('administradora')
+            && changesOnly(['displayName', 'phone', 'role', 'isActive', 'unitId', 'towerId'])
+            && request.resource.data.role in ['residente', 'portero', 'administradora']
+            && (!isSelf(userId) || changesOnly(['displayName', 'phone'])));
+
       allow delete: if false;
     }
 
     // ==========================================
-    // COLECCIÓN: TORRES Y APARTAMENTOS (CENSO)
+    // TORRES Y APARTAMENTOS (CENSO) — SCRUM-10
     // ==========================================
     match /towers/{towerId} {
       allow read: if isAuthenticated();
-      allow write: if hasRole('administradora');
+      allow create, update: if hasRole('administradora')
+        && request.resource.data.id == towerId
+        && isNonEmptyString(request.resource.data.name)
+        && request.resource.data.totalApartments is int;
+      allow delete: if hasRole('administradora');
     }
 
     match /apartments/{apartmentId} {
-      allow read: if hasRole('administradora') || hasRole('portero') || (hasRole('residente') && request.auth.uid in resource.data.residentUids);
-      allow write: if hasRole('administradora');
+      allow read: if hasRole('administradora') || hasRole('portero') || isResidentOf(apartmentId);
 
-      // Subcolección de personas autorizadas (RN-B4, RN-B7 - Habeas Data)
+      // Id determinista `${towerId}-${number}` (p. ej. T1-101): no puede haber dos
+      // apartamentos con el mismo número en la misma torre (CON-02).
+      allow create: if hasRole('administradora')
+        && request.resource.data.id == apartmentId
+        && apartmentId == request.resource.data.towerId + '-' + request.resource.data.number
+        && exists(/databases/$(database)/documents/towers/$(request.resource.data.towerId))
+        && request.resource.data.residentUids is list
+        && request.resource.data.createdAt == request.time;
+
+      // La torre y el número no cambian después de creado.
+      allow update: if hasRole('administradora')
+        && changesOnly(['ownerName', 'residentUids'])
+        && request.resource.data.residentUids is list;
+
+      allow delete: if hasRole('administradora');
+
+      // Personas autorizadas a recibir paquetes (RN-B4, RN-B7 - Habeas Data).
+      // Los residentes del apartamento también se registran aquí con
+      // relation 'residente' (id = uid), para validar entregas a ellos.
       match /authorized/{authId} {
-        allow read: if hasRole('administradora') || hasRole('portero') || (hasRole('residente') && request.auth.uid in get(/databases/$(database)/documents/apartments/$(apartmentId)).data.residentUids);
-        allow write: if hasRole('administradora') || (hasRole('residente') && request.auth.uid in get(/databases/$(database)/documents/apartments/$(apartmentId)).data.residentUids);
+        function validAuthorized() {
+          return isNonEmptyString(request.resource.data.fullName)
+            && isNonEmptyString(request.resource.data.documentId)
+            && request.resource.data.relation is string
+            && request.resource.data.isActive is bool
+            && request.resource.data.id == authId;
+        }
+
+        allow read: if hasRole('administradora') || hasRole('portero') || isResidentOf(apartmentId);
+
+        allow create: if validAuthorized()
+          && request.resource.data.registeredAt == request.time
+          && (hasRole('administradora')
+              || (isResidentOf(apartmentId) && request.resource.data.relation != 'residente'));
+
+        allow update: if validAuthorized()
+          && request.resource.data.registeredAt == resource.data.registeredAt
+          && (hasRole('administradora')
+              || (isResidentOf(apartmentId)
+                  && resource.data.relation != 'residente'
+                  && request.resource.data.relation != 'residente'));
+
+        allow delete: if hasRole('administradora')
+          || (isResidentOf(apartmentId) && resource.data.relation != 'residente');
       }
     }
 
     // ==========================================
-    // COLECCIÓN: PAQUETERÍA (packages/{packageId})
+    // PAQUETERÍA (packages/{packageId}) — SCRUM-14, 17, 21
     // ==========================================
     match /packages/{packageId} {
-      // Lectura: Porteros/Admin ven todo; Residentes solo ven los de su propio apartamento (RN-B7)
-      allow read: if hasRole('portero') || hasRole('administradora') || (hasRole('residente') && resource.data.apartmentId == getUserData().unitId);
-      
-      // Creación: Solo portero o administradora; siempre inicia 'Pendiente' con timestamp del servidor
+      // Porteros y administradora ven todo; el residente solo lo de su
+      // apartamento (RN-B7). Las consultas del residente deben filtrar por
+      // apartmentId para que la regla pueda evaluarse.
+      allow read: if hasRole('portero') || hasRole('administradora')
+        || (hasRole('residente') && resource.data.apartmentId == myUnitId());
+
+      // Registro (SCRUM-14): siempre 'Pendiente', reloj del servidor, autoría
+      // del portero autenticado y solo para apartamentos existentes.
       allow create: if (hasRole('portero') || hasRole('administradora'))
+        && request.resource.data.keys().hasOnly(['trackingNumber', 'courier', 'towerId', 'apartmentId', 'recipientName', 'status', 'notes', 'receivedByPorteroId', 'receivedAt', 'createdAt'])
         && request.resource.data.status == 'Pendiente'
         && request.resource.data.receivedByPorteroId == request.auth.uid
         && request.resource.data.receivedAt == request.time
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.towerId is string
         && request.resource.data.apartmentId is string
-        && request.resource.data.recipientName is string;
+        && isNonEmptyString(request.resource.data.recipientName)
+        && isNonEmptyString(request.resource.data.courier)
+        && exists(apartmentPath(request.resource.data.apartmentId))
+        && get(apartmentPath(request.resource.data.apartmentId)).data.towerId == request.resource.data.towerId;
 
-      // Entrega (RN-B4): Solo portero o administradora; pasa de 'Pendiente' a 'Entregado'
+      // Entrega (SCRUM-21, RN-B4): solo de 'Pendiente' a 'Entregado', a una
+      // persona activa registrada en apartments/{apt}/authorized cuyo nombre y
+      // documento coinciden. Un paquete entregado queda sellado.
       allow update: if (hasRole('portero') || hasRole('administradora'))
         && resource.data.status == 'Pendiente'
         && request.resource.data.status == 'Entregado'
+        && changesOnly(['status', 'deliveredAt', 'deliveredByPorteroId', 'deliveredToAuthId', 'deliveredToPerson', 'deliveredToDocument', 'deliveryNotes'])
         && request.resource.data.deliveredAt == request.time
         && request.resource.data.deliveredByPorteroId == request.auth.uid
-        && request.resource.data.deliveredToPerson is string
-        && request.resource.data.receivedAt == resource.data.receivedAt
-        && request.resource.data.receivedByPorteroId == resource.data.receivedByPorteroId
-        && request.resource.data.apartmentId == resource.data.apartmentId;
+        && deliveredToAuthorized(resource.data.apartmentId, request.resource.data);
 
       allow delete: if false;
+
+      function deliveredToAuthorized(apartmentId, data) {
+        let authPath = /databases/$(database)/documents/apartments/$(apartmentId)/authorized/$(data.deliveredToAuthId);
+        return data.deliveredToAuthId is string
+          && exists(authPath)
+          && get(authPath).data.isActive == true
+          && get(authPath).data.fullName == data.deliveredToPerson
+          && get(authPath).data.documentId == data.deliveredToDocument;
+      }
     }
 
     // ==========================================
-    // COLECCIÓN: RESERVAS (reservations/{resId})
-    // RN-B1 (Cruces), RN-B2 (48h), RN-B3 (1/mes)
+    // RESERVAS (reservations/{reservationId}) — SCRUM-24
+    // RN-B1 (cruces), RN-B2 (48 h), RN-B3 (1 por mes)
     // ==========================================
+
+    // Franjas por zona común, en hora local de Colombia (UTC-5, sin horario
+    // de verano). Debe coincidir con SLOTS en src/services/reservationSlots.ts.
+    function slots() {
+      return {
+        'salon_social': {'AM': [8, 14], 'PM': [15, 22]},
+        'bbq': {'AM': [10, 16], 'PM': [17, 22]}
+      };
+    }
+
+    // Hora local -> instante UTC del día `date` (formato YYYY-MM-DD).
+    function localTime(date, hour) {
+      let parts = date.split('-');
+      return timestamp.date(int(parts[0]), int(parts[1]), int(parts[2]))
+        + duration.value(hour + 5, 'h');
+    }
+
+    // 'YYYY-MM-DD' -> 'YYYY-MM'
+    function monthOf(date) {
+      return date.split('-')[0] + '-' + date.split('-')[1];
+    }
+
+    function slotLockPath(data) {
+      return /databases/$(database)/documents/reservationSlots/$(data.commonArea + '_' + data.date + '_' + data.slot);
+    }
+
+    function quotaPath(apartmentId, date) {
+      return /databases/$(database)/documents/reservationQuotas/$(apartmentId + '_' + monthOf(date));
+    }
+
     match /reservations/{reservationId} {
-      allow read: if isAuthenticated();
-      
-      // Solicitud: Residente solicita para su propio apto con mín 48 horas de anticipación (RN-B2)
+      // Privacidad (RN-B7): cada residente ve solo las de su apartamento.
+      // La disponibilidad pública se consulta en reservationSlots.
+      allow read: if hasRole('administradora')
+        || (hasRole('residente') && resource.data.apartmentId == myUnitId());
+
+      // Solicitud: el cliente crea en un mismo batch la reserva y su cupo
+      // mensual (reservationQuotas). Si el apartamento ya tiene cupo ese mes,
+      // el batch completo falla (RN-B3).
       allow create: if hasRole('residente')
+        && request.resource.data.keys().hasOnly(['commonArea', 'apartmentId', 'residentId', 'date', 'slot', 'startTime', 'endTime', 'status', 'createdAt'])
         && request.resource.data.status == 'Pendiente'
         && request.resource.data.residentId == request.auth.uid
-        && request.resource.data.apartmentId == getUserData().unitId
+        && myUnitId() != null
+        && request.resource.data.apartmentId == myUnitId()
         && request.resource.data.createdAt == request.time
+        && request.resource.data.commonArea in slots()
+        && request.resource.data.slot in slots()[request.resource.data.commonArea]
+        && request.resource.data.date is string
+        && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.startTime == localTime(request.resource.data.date, slots()[request.resource.data.commonArea][request.resource.data.slot][0])
+        && request.resource.data.endTime == localTime(request.resource.data.date, slots()[request.resource.data.commonArea][request.resource.data.slot][1])
+        // RN-B2: mínimo 48 horas de anticipación.
         && request.resource.data.startTime >= request.time + duration.value(48, 'h')
-        && request.resource.data.endTime > request.resource.data.startTime
-        && (request.resource.data.commonArea in ['salon_social', 'bbq']);
+        // RN-B1: la franja no puede estar ya aprobada para otra reserva.
+        && !exists(slotLockPath(request.resource.data))
+        // RN-B3: el cupo del mes se crea en el mismo batch y apunta a esta reserva.
+        && existsAfter(quotaPath(request.resource.data.apartmentId, request.resource.data.date))
+        && getAfter(quotaPath(request.resource.data.apartmentId, request.resource.data.date)).data.reservationId == reservationId;
 
-      // Resolución: Solo administradora aprueba o rechaza; rechazo exige motivo >= 5 caracteres
+      // Resolución por la administradora (CON-07). Aprobar exige crear en el
+      // mismo batch el bloqueo de la franja; como un documento no puede
+      // crearse dos veces, nunca habrá dos reservas aprobadas en la misma
+      // zona, fecha y franja (RN-B1), aunque se aprueben a la vez.
       allow update: if hasRole('administradora')
         && resource.data.status == 'Pendiente'
         && (request.resource.data.status in ['Aprobada', 'Rechazada'])
+        && changesOnly(['status', 'rejectionReason', 'resolvedAt', 'resolvedBy'])
         && (request.resource.data.status != 'Rechazada' || (request.resource.data.rejectionReason is string && request.resource.data.rejectionReason.size() >= 5))
+        && (request.resource.data.status != 'Aprobada'
+            || (existsAfter(slotLockPath(resource.data))
+                && getAfter(slotLockPath(resource.data)).data.reservationId == reservationId))
         && request.resource.data.resolvedAt == request.time
-        && request.resource.data.resolvedBy == request.auth.uid
-        && request.resource.data.startTime == resource.data.startTime
-        && request.resource.data.endTime == resource.data.endTime
-        && request.resource.data.commonArea == resource.data.commonArea
-        && request.resource.data.apartmentId == resource.data.apartmentId;
+        && request.resource.data.resolvedBy == request.auth.uid;
 
       allow delete: if false;
     }
 
+    // Bloqueo de franja aprobada (RN-B1). Sin datos personales: lo leen
+    // todos para pintar la disponibilidad del calendario.
+    match /reservationSlots/{slotId} {
+      allow read: if isAuthenticated();
+      allow create: if hasRole('administradora')
+        && request.resource.data.keys().hasOnly(['reservationId', 'commonArea', 'date', 'slot'])
+        && slotId == request.resource.data.commonArea + '_' + request.resource.data.date + '_' + request.resource.data.slot
+        && getAfter(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.status == 'Aprobada';
+      allow update: if false;
+      allow delete: if hasRole('administradora');
+    }
+
+    // Cupo mensual por apartamento (RN-B3): {apartmentId}_{YYYY-MM}.
+    // Al rechazar una reserva, la administradora borra el cupo para liberarlo.
+    match /reservationQuotas/{quotaId} {
+      // Se evalúa por el id (no por resource) para que el residente pueda
+      // consultar si su cupo del mes existe antes de crearlo.
+      allow read: if hasRole('administradora')
+        || (hasRole('residente') && myUnitId() != null
+            && quotaId.matches('^' + myUnitId() + '_[0-9]{4}-[0-9]{2}$'));
+      allow create: if hasRole('residente')
+        && request.resource.data.keys().hasOnly(['apartmentId', 'month', 'reservationId'])
+        && request.resource.data.apartmentId == myUnitId()
+        && quotaId == request.resource.data.apartmentId + '_' + request.resource.data.month
+        && getAfter(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.apartmentId == myUnitId()
+        && monthOf(getAfter(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.date) == request.resource.data.month;
+      allow update: if false;
+      allow delete: if hasRole('administradora');
+    }
+
     // ==========================================
-    // CONTADORES Y RADICACIÓN (counters/pqrs)
+    // CONTADORES Y RADICACIÓN (counters/pqrs) — Sprint 2
     // ==========================================
     match /counters/pqrs {
       allow read: if isAuthenticated();
@@ -124,17 +311,17 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // COLECCIÓN: PQRS (pqrs/{pqrsId})
+    // PQRS (pqrs/{pqrsId}) — Sprint 2
     // RN-B6 (Respuesta oficial e historial inmutable)
     // ==========================================
     match /pqrs/{pqrsId} {
-      allow read: if hasRole('administradora') || (hasRole('residente') && resource.data.apartmentId == getUserData().unitId);
-      
+      allow read: if hasRole('administradora') || (hasRole('residente') && resource.data.apartmentId == myUnitId());
+
       allow create: if hasRole('residente')
         && request.resource.data.status == 'Radicada'
         && request.resource.data.createdAt == request.time
         && request.resource.data.residentId == request.auth.uid
-        && request.resource.data.apartmentId == getUserData().unitId;
+        && request.resource.data.apartmentId == myUnitId();
 
       allow update: if hasRole('administradora')
         && ((request.resource.data.status == 'En gestión' && resource.data.status == 'Radicada')
@@ -147,7 +334,7 @@ service cloud.firestore {
 
       // Subcolección de auditoría de estados
       match /history/{historyId} {
-        allow read: if hasRole('administradora') || (hasRole('residente') && get(/databases/$(database)/documents/pqrs/$(pqrsId)).data.apartmentId == getUserData().unitId);
+        allow read: if hasRole('administradora') || (hasRole('residente') && get(/databases/$(database)/documents/pqrs/$(pqrsId)).data.apartmentId == myUnitId());
         allow create: if hasRole('administradora') && request.resource.data.changedAt == request.time;
         allow update, delete: if false;
       }
