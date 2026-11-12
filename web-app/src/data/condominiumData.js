@@ -301,15 +301,24 @@ export const INITIAL_PACKAGES = generateInitialPackages();
 export const INITIAL_RESERVATIONS = generateInitialReservations();
 export const INITIAL_PQRS = generateInitialPqrs();
 
-// Initial state loader
+// Initial state loader (resiliente ante datos corruptos o esquemas previos)
 export function loadCondominiumState() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw) {
-    try {
-      return JSON.parse(raw);
-    } catch (e) {
-      console.warn('Could not parse stored data, reloading seed:', e);
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.apartments) && Array.isArray(parsed.packages) && Array.isArray(parsed.reservations)) {
+        return {
+          apartments: parsed.apartments || APARTMENTS,
+          packages: parsed.packages || INITIAL_PACKAGES,
+          reservations: parsed.reservations || INITIAL_RESERVATIONS,
+          pqrs: Array.isArray(parsed.pqrs) ? parsed.pqrs : INITIAL_PQRS,
+          nextPqrsSeq: parsed.nextPqrsSeq || 42
+        };
+      }
     }
+  } catch (e) {
+    console.warn('Could not parse stored data, reloading seed:', e);
   }
 
   const initial = {

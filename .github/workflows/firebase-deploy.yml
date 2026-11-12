@@ -22,6 +22,14 @@ jobs:
             web-app/package-lock.json
 
       - name: Compilar Frontend (web-app)
+        env:
+          VITE_FIREBASE_API_KEY: AIzaSyCgOVz0OTvKmv8ZdVS7XstuRZER1tI8tyI
+          VITE_FIREBASE_AUTH_DOMAIN: condominium-f6236.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: condominium-f6236
+          VITE_FIREBASE_STORAGE_BUCKET: condominium-f6236.firebasestorage.app
+          VITE_FIREBASE_MESSAGING_SENDER_ID: "452274246990"
+          VITE_FIREBASE_APP_ID: "1:452274246990:web:83f234b2cde639ba413a1f"
+          VITE_FIREBASE_MEASUREMENT_ID: G-LP5JYC0HZB
         run: |
           cd web-app
           npm ci
