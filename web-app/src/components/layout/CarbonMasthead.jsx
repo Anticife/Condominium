@@ -10,7 +10,7 @@ import {
   CalendarDays
 } from 'lucide-react';
 
-export default function CarbonMasthead({ currentRole, onRoleChange, state }) {
+export default function CarbonMasthead({ currentRole, onRoleChange, state, backendStatus }) {
   const [timeStr, setTimeStr] = useState('');
 
   useEffect(() => {
@@ -30,6 +30,9 @@ export default function CarbonMasthead({ currentRole, onRoleChange, state }) {
     return days >= 15;
   }).length;
   const pendingReservationsCount = state.reservations.filter(r => r.status === 'Pendiente').length;
+
+  const statusLabel = backendStatus ? backendStatus.message : 'FIREBASE SPARK ENGINE: CONNECTED';
+  const statusColor = backendStatus && backendStatus.isFirestoreLive ? '#42be65' : '#78a9ff';
 
   return (
     <header style={{
@@ -54,9 +57,9 @@ export default function CarbonMasthead({ currentRole, onRoleChange, state }) {
         color: '#c6c6c6'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#42be65' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: statusColor }}>
             <Activity size={12} />
-            FIREBASE SPARK ENGINE: CONNECTED
+            {statusLabel.toUpperCase()}
           </span>
           <span style={{ color: '#8d8d8d' }}>|</span>
           <span>COPROPIEDAD: ALTOS DEL PARQUE (3 TORRES // 240 UNIDADES)</span>

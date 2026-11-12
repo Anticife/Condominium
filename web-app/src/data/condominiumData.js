@@ -6,13 +6,15 @@
 
 const STORAGE_KEY = 'altos_del_parque_store_v1';
 
+export const TOWERS = [
+  { id: 'T1', name: 'Torre 1 (Pisos 1-8)', floors: 8, perFloor: 10, totalApartments: 80 },
+  { id: 'T2', name: 'Torre 2 (Pisos 1-8)', floors: 8, perFloor: 10, totalApartments: 80 },
+  { id: 'T3', name: 'Torre 3 (Pisos 1-8)', floors: 8, perFloor: 10, totalApartments: 80 },
+];
+
 // Seed generator for 3 towers and 240 apartments
 function generateInitialApartments() {
-  const towers = [
-    { id: 'T1', name: 'Torre 1 (Pisos 1-8)', floors: 8, perFloor: 10 },
-    { id: 'T2', name: 'Torre 2 (Pisos 1-8)', floors: 8, perFloor: 10 },
-    { id: 'T3', name: 'Torre 3 (Pisos 1-8)', floors: 8, perFloor: 10 },
-  ];
+  const towers = TOWERS;
 
   const apartments = [];
   const sampleSurnames = ['Rodríguez', 'Gómez', 'Martínez', 'López', 'González', 'Pérez', 'Sánchez', 'Ramírez', 'Torres', 'Díaz', 'Vargas', 'Castro', 'Morales', 'Herrera', 'Ríos'];
@@ -294,6 +296,11 @@ function generateInitialPqrs() {
   ];
 }
 
+export const APARTMENTS = generateInitialApartments();
+export const INITIAL_PACKAGES = generateInitialPackages();
+export const INITIAL_RESERVATIONS = generateInitialReservations();
+export const INITIAL_PQRS = generateInitialPqrs();
+
 // Initial state loader
 export function loadCondominiumState() {
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -306,10 +313,10 @@ export function loadCondominiumState() {
   }
 
   const initial = {
-    apartments: generateInitialApartments(),
-    packages: generateInitialPackages(),
-    reservations: generateInitialReservations(),
-    pqrs: generateInitialPqrs(),
+    apartments: APARTMENTS,
+    packages: INITIAL_PACKAGES,
+    reservations: INITIAL_RESERVATIONS,
+    pqrs: INITIAL_PQRS,
     nextPqrsSeq: 42
   };
 

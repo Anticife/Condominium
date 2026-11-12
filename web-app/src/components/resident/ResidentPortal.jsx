@@ -17,9 +17,8 @@ export default function ResidentPortal({ state, onAddReservation, onAddPqrs, onA
 
   // Booking Form State
   const [selectedArea, setSelectedArea] = useState('salon_social');
+  const [selectedSlot, setSelectedSlot] = useState('PM'); // 'AM' | 'PM' (según reservationSlots.ts)
   const [bookingDate, setBookingDate] = useState('');
-  const [bookingStartHour, setBookingStartHour] = useState('14:00');
-  const [bookingEndHour, setBookingEndHour] = useState('20:00');
   const [bookingError, setBookingError] = useState(null);
   const [bookingSuccess, setBookingSuccess] = useState(null);
 
@@ -62,8 +61,12 @@ export default function ResidentPortal({ state, onAddReservation, onAddPqrs, onA
       return;
     }
 
-    const startDateTime = new Date(`${bookingDate}T${bookingStartHour}:00`);
-    const endDateTime = new Date(`${bookingDate}T${bookingEndHour}:00`);
+    const slotTimesConfig = selectedArea === 'salon_social'
+      ? (selectedSlot === 'AM' ? { start: '08:00', end: '14:00' } : { start: '15:00', end: '22:00' })
+      : (selectedSlot === 'AM' ? { start: '10:00', end: '16:00' } : { start: '17:00', end: '22:00' });
+
+    const startDateTime = new Date(`${bookingDate}T${slotTimesConfig.start}:00`);
+    const endDateTime = new Date(`${bookingDate}T${slotTimesConfig.end}:00`);
     const now = new Date();
 
     // 1. Validate RN-B2: At least 48 hours in advance
@@ -103,6 +106,7 @@ export default function ResidentPortal({ state, onAddReservation, onAddPqrs, onA
     const newRes = {
       id: `RES-2026-${Date.now().toString().slice(-4)}`,
       commonArea: selectedArea,
+      slot: selectedSlot,
       commonAreaName: selectedArea === 'salon_social' ? 'Salón Social Comunitario' : 'Zona BBQ & Terraza',
       capacity: selectedArea === 'salon_social' ? 80 : 30,
       depositAmount: selectedArea === 'salon_social' ? 200000 : 80000,
@@ -455,32 +459,47 @@ export default function ResidentPortal({ state, onAddReservation, onAddPqrs, onA
                 />
               </div>
 
-              {/* Time Slots */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
-                <div>
-                  <label className="cds-input-label">HORA INICIO</label>
-                  <select 
-                    className="cds-select font-mono"
-                    value={bookingStartHour}
-                    onChange={(e) => setBookingStartHour(e.target.value)}
+              {/* Official Time Slot Buttons according to reservationSlots.ts & RN-B1 */}
+              <div style={{ marginBottom: '20px' }}>
+                <label className="cds-input-label">FRANJA HORARIA NORMATIVA (RN-B1)</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSlot('AM')}
+                    style={{
+                      padding: '10px 12px',
+                      backgroundColor: selectedSlot === 'AM' ? '#161616' : '#ffffff',
+                      color: selectedSlot === 'AM' ? '#ffffff' : '#161616',
+                      border: '1px solid',
+                      borderColor: selectedSlot === 'AM' ? '#161616' : '#8d8d8d',
+                      textAlign: 'left',
+                      cursor: 'pointer'
+                    }}
                   >
-                    <option value="10:00">10:00 AM</option>
-                    <option value="12:00">12:00 PM</option>
-                    <option value="14:00">02:00 PM</option>
-                    <option value="16:00">04:00 PM</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="cds-input-label">HORA FIN</label>
-                  <select 
-                    className="cds-select font-mono"
-                    value={bookingEndHour}
-                    onChange={(e) => setBookingEndHour(e.target.value)}
+                    <div style={{ fontWeight: 600, fontSize: '12px' }}>Franja Diurna (AM)</div>
+                    <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', opacity: 0.85 }}>
+                      {selectedArea === 'salon_social' ? '08:00 - 14:00 (6 hrs)' : '10:00 - 16:00 (6 hrs)'}
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSlot('PM')}
+                    style={{
+                      padding: '10px 12px',
+                      backgroundColor: selectedSlot === 'PM' ? '#161616' : '#ffffff',
+                      color: selectedSlot === 'PM' ? '#ffffff' : '#161616',
+                      border: '1px solid',
+                      borderColor: selectedSlot === 'PM' ? '#161616' : '#8d8d8d',
+                      textAlign: 'left',
+                      cursor: 'pointer'
+                    }}
                   >
-                    <option value="18:00">06:00 PM</option>
-                    <option value="20:00">08:00 PM</option>
-                    <option value="22:00">10:00 PM</option>
-                  </select>
+                    <div style={{ fontWeight: 600, fontSize: '12px' }}>Franja Nocturna (PM)</div>
+                    <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', opacity: 0.85 }}>
+                      {selectedArea === 'salon_social' ? '15:00 - 22:00 (7 hrs)' : '17:00 - 22:00 (5 hrs)'}
+                    </div>
+                  </button>
                 </div>
               </div>
 

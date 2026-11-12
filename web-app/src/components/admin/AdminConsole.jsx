@@ -17,7 +17,7 @@ export default function AdminConsole({
   state, 
   onResolveReservation, 
   onTransitionPqrs, 
-  onImportCensusBatch: _onImportCensusBatch 
+  onImportCensusBatch 
 }) {
   const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'reservations' | 'pqrs' | 'census'
 
@@ -111,13 +111,14 @@ export default function AdminConsole({
     return true;
   });
 
-  // Batch Import Simulation
-  const handleSimulateBatchImport = () => {
-    setImportStatusMsg('Procesando archivo censo_altos_del_parque.xlsx con writeBatch en Firestore...');
-    setTimeout(() => {
-      setImportStatusMsg('✔ 240 Apartamentos y 3 Torres sincronizados exitosamente sin inconsistencias (CON-13 / RF-04).');
-      setTimeout(() => setImportStatusMsg(null), 5000);
-    }, 1200);
+  // Batch Import Simulation & Firestore Seeding
+  const handleSimulateBatchImport = async () => {
+    setImportStatusMsg('Sincronizando censo y sembrando en Cloud Firestore...');
+    if (onImportCensusBatch) {
+      await onImportCensusBatch();
+    }
+    setImportStatusMsg('✔ 240 Apartamentos y 3 Torres sincronizados con Cloud Firestore (CON-13 / RF-04).');
+    setTimeout(() => setImportStatusMsg(null), 5000);
   };
 
   return (
