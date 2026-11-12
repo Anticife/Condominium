@@ -10,9 +10,16 @@ import {
   CheckCircle2
 } from 'lucide-react';
 
-export default function ResidentPortal({ state, onAddReservation, onAddPqrs, onAddAuthorized, onRemoveAuthorized }) {
+export default function ResidentPortal({ 
+  state, 
+  currentUser,
+  onAddReservation, 
+  onAddPqrs, 
+  onAddAuthorized, 
+  onRemoveAuthorized 
+}) {
   // Current logged in resident context (default: Carlos Rodríguez, T1-101)
-  const [activeAptId, setActiveAptId] = useState('T1-101');
+  const [activeAptId, setActiveAptId] = useState(() => currentUser?.unitId || 'T1-101');
   const [activeTab, setActiveTab] = useState('packages'); // 'packages' | 'reservations' | 'authorized' | 'pqrs'
 
   // Booking Form State

@@ -3,6 +3,7 @@ import CarbonMasthead from './components/layout/CarbonMasthead';
 import GuardTerminal from './components/guard/GuardTerminal';
 import ResidentPortal from './components/resident/ResidentPortal';
 import AdminConsole from './components/admin/AdminConsole';
+import LoginModal, { PRESET_USERS } from './components/auth/LoginModal';
 import { loadCondominiumState, saveCondominiumState } from './data/condominiumData';
 import { 
   probeBackendStatus,
@@ -19,9 +20,45 @@ import { CheckCircle2, AlertTriangle, X } from 'lucide-react';
 
 export default function App() {
   const [condoState, setCondoState] = useState(() => loadCondominiumState());
-  const [currentRole, setCurrentRole] = useState('portero'); // Default to Portería to test high-speed parcel intake
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('altos_active_user');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return PRESET_USERS[0]; // Default to Vigilante Néstor Beltrán
+  });
+  const [currentRole, setCurrentRole] = useState(() => {
+    try {
+      const saved = localStorage.getItem('altos_active_user');
+      if (saved) return JSON.parse(saved).role || 'portero';
+    } catch (_) {}
+    return 'portero';
+  });
   const [backendStatus, setBackendStatus] = useState(null);
   const [toastNotification, setToastNotification] = useState(null);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+
+  // Sync active user to local storage
+  const handleLoginSuccess = (user) => {
+    setCurrentUser(user);
+    setCurrentRole(user.role);
+    try {
+      localStorage.setItem('altos_active_user', JSON.stringify(user));
+    } catch (_) {}
+    showToast('success', `Identidad verificada: ${user.name} (${user.roleLabel || user.role}).`);
+  };
+
+  const handleRoleChange = (newRole) => {
+    setCurrentRole(newRole);
+    // Sync persona if switching roles
+    const matched = PRESET_USERS.find(p => p.role === newRole);
+    if (matched) {
+      setCurrentUser(matched);
+      try {
+        localStorage.setItem('altos_active_user', JSON.stringify(matched));
+      } catch (_) {}
+    }
+  };
 
   // Probe Firestore & Auth Status on mount
   useEffect(() => {
@@ -314,9 +351,19 @@ export default function App() {
       {/* IBM Carbon Masthead */}
       <CarbonMasthead
         currentRole={currentRole}
-        onRoleChange={setCurrentRole}
+        onRoleChange={handleRoleChange}
         state={condoState}
         backendStatus={backendStatus}
+        currentUser={currentUser}
+        onOpenLogin={() => setIsLoginModalOpen(true)}
+        onLogout={() => setIsLoginModalOpen(true)}
+      />
+
+      {/* Authentication & Role Protection Modal (SCRUM-7, SCRUM-8, SCRUM-53) */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
       />
 
       {/* Floating IBM Carbon Toast Notification */}
@@ -362,6 +409,7 @@ export default function App() {
         {currentRole === 'residente' && (
           <ResidentPortal
             state={condoState}
+            currentUser={currentUser}
             onAddReservation={handleAddReservation}
             onAddPqrs={handleAddPqrs}
             onAddAuthorized={handleAddAuthorized}

@@ -10,8 +10,11 @@ import {
   Search, 
   CheckCircle2, 
   TrendingUp,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Printer
 } from 'lucide-react';
+import BoardReportModal from './BoardReportModal';
+import CensusUploadModal from './CensusUploadModal';
 
 export default function AdminConsole({ 
   state, 
@@ -35,6 +38,10 @@ export default function AdminConsole({
   const [censusTowerFilter, setCensusTowerFilter] = useState('ALL');
   const [censusSearch, setCensusSearch] = useState('');
   const [importStatusMsg, setImportStatusMsg] = useState(null);
+
+  // Executive Modals State
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   // ==========================================================================
   // METRICS COMPUTATION FOR THE BOARD OF DIRECTORS (CONSEJO DE ADMINISTRACIÓN)
@@ -199,6 +206,36 @@ export default function AdminConsole({
           ========================================================================== */}
       {adminTab === 'dashboard' && (
         <div>
+          {/* Executive Action Toolbar */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            backgroundColor: '#ffffff',
+            border: '1px solid #e0e0e0',
+            padding: '12px 16px',
+            marginBottom: '20px'
+          }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '14px', color: '#161616' }}>
+                Métricas de Rendimiento & Cumplimiento Normativo
+              </div>
+              <div style={{ fontSize: '12px', color: '#525252' }}>
+                Auditoría en tiempo real para el Consejo de Administración según Ley 675 y reglas RN-B1..RN-B7.
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="cds-btn cds-btn-primary"
+              style={{ height: '36px', fontSize: '12px' }}
+              onClick={() => setIsReportModalOpen(true)}
+            >
+              <Printer size={15} />
+              <span>Generar Informe Ejecutivo para el Consejo (SCRUM-41)</span>
+            </button>
+          </div>
+
           {/* Executive KPI Cards Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
             
@@ -548,12 +585,12 @@ export default function AdminConsole({
             <div style={{ display: 'flex', gap: '12px' }}>
               <button
                 type="button"
-                className="cds-btn cds-btn-secondary"
+                className="cds-btn cds-btn-primary"
                 style={{ height: '36px', fontSize: '12px' }}
-                onClick={handleSimulateBatchImport}
+                onClick={() => setIsUploadModalOpen(true)}
               >
                 <FileSpreadsheet size={15} />
-                <span>Simular Importador Excel / writeBatch (CON-13)</span>
+                <span>Carga Masiva Excel & Previsualización (SCRUM-44)</span>
               </button>
             </div>
           </div>
@@ -761,6 +798,20 @@ export default function AdminConsole({
           </div>
         </div>
       )}
+
+      {/* Official Executive Board Report Modal (SCRUM-41) */}
+      <BoardReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        state={state}
+      />
+
+      {/* Batch Census Upload & Validation Modal (SCRUM-44) */}
+      <CensusUploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        onConfirmSeed={handleSimulateBatchImport}
+      />
     </div>
   );
 }

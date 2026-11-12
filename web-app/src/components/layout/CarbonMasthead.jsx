@@ -7,10 +7,20 @@ import {
   Clock, 
   Activity, 
   Package, 
-  CalendarDays
+  CalendarDays,
+  LogOut,
+  KeyRound
 } from 'lucide-react';
 
-export default function CarbonMasthead({ currentRole, onRoleChange, state, backendStatus }) {
+export default function CarbonMasthead({ 
+  currentRole, 
+  onRoleChange, 
+  state, 
+  backendStatus,
+  currentUser,
+  onOpenLogin,
+  onLogout
+}) {
   const [timeStr, setTimeStr] = useState('');
 
   useEffect(() => {
@@ -228,6 +238,68 @@ export default function CarbonMasthead({ currentRole, onRoleChange, state, backe
               <SlidersHorizontal size={14} />
               Administración & Consejo
             </button>
+          </div>
+
+          {/* User Session Chip & Switcher (SCRUM-7, SCRUM-8) */}
+          <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid #393939', paddingLeft: '12px' }}>
+            {currentUser ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{
+                  width: '28px',
+                  height: '28px',
+                  backgroundColor: '#0f62fe',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  fontFamily: 'var(--cds-font-mono)'
+                }}>
+                  {currentUser.name ? currentUser.name.split(' ').map(n => n[0]).slice(0, 2).join('') : 'US'}
+                </div>
+                <div style={{ lineHeight: 1.2 }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff' }}>
+                    {currentUser.name}
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#8d8d8d', fontFamily: 'var(--cds-font-mono)' }}>
+                    {currentUser.unitId ? `Apto ${currentUser.unitId}` : currentUser.roleLabel || currentUser.role}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  title="Cambiar de Sesión o Perfil"
+                  onClick={onLogout || onOpenLogin}
+                  style={{
+                    backgroundColor: '#262626',
+                    border: '1px solid #393939',
+                    color: '#c6c6c6',
+                    padding: '6px 8px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '11px',
+                    marginLeft: '4px'
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.backgroundColor = '#393939'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = '#c6c6c6'; e.currentTarget.style.backgroundColor = '#262626'; }}
+                >
+                  <LogOut size={12} />
+                  <span>Salir</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenLogin}
+                className="cds-btn cds-btn-primary"
+                style={{ height: '32px', fontSize: '11px', padding: '0 12px' }}
+              >
+                <KeyRound size={13} />
+                <span>Iniciar Sesión</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
