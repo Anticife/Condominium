@@ -1,8 +1,8 @@
 // SCRUM-6: roles y aislamiento de users/{userId}.
 import { assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing'
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest'
-import { assignResidentToApartment, registerOwnProfile, setStaffRole } from '../../src/services/userService'
+import { assignResidentToApartment, registerOwnProfile, setStaffRole, updateOwnContact } from '../../src/services/userService'
 import { anonDb, createEnv, dbAs, hasEmulator, seed, UIDS } from './helpers'
 
 describe.skipIf(!hasEmulator)('auth_roles (SCRUM-6)', () => {
@@ -64,5 +64,14 @@ describe.skipIf(!hasEmulator)('auth_roles (SCRUM-6)', () => {
 
   it('un usuario sin perfil no tiene rol', async () => {
     await assertFails(getDoc(doc(dbAs(env, UIDS.noProfile), 'apartments', 'T1-101')))
+  })
+
+  it('la administradora lista usuarios y el usuario actualiza su propio contacto', async () => {
+    await assertSucceeds(getDocs(collection(dbAs(env, UIDS.admin), 'users')))
+    await assertFails(getDocs(collection(dbAs(env, UIDS.res101), 'users')))
+    await assertSucceeds(updateOwnContact(dbAs(env, UIDS.res101), UIDS.res101, {
+      displayName: 'Carlos Actualizado',
+      phone: '3115550000',
+    }))
   })
 })

@@ -124,6 +124,40 @@ export function subscribeToApartmentPackages(
   return onSnapshot(q, (snap) => onChange(toPackages(snap.docs)), onError)
 }
 
+/**
+ * Residente: todos los paquetes de su apartamento (pendientes y entregados).
+ * Se ordenan en cliente para no requerir índice compuesto adicional.
+ */
+export function subscribeToAllApartmentPackages(
+  db: Firestore,
+  apartmentId: string,
+  onChange: (packages: Package[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  const q = query(
+    collection(db, 'packages'),
+    where('apartmentId', '==', apartmentId),
+  )
+  return onSnapshot(q, (snap) => {
+    const items = toPackages(snap.docs).sort((a, b) => {
+      const ta = a.receivedAt?.toMillis?.() ?? 0
+      const tb = b.receivedAt?.toMillis?.() ?? 0
+      return tb - ta
+    })
+    onChange(items)
+  }, onError)
+}
+
+/** Administración / Portería: histórico completo de paquetes. */
+export function subscribeToAllPackages(
+  db: Firestore,
+  onChange: (packages: Package[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  const q = query(collection(db, 'packages'), orderBy('receivedAt', 'desc'))
+  return onSnapshot(q, (snap) => onChange(toPackages(snap.docs)), onError)
+}
+
 // ---------- SCRUM-21: entrega ----------
 
 /**

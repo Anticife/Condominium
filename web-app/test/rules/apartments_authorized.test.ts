@@ -2,7 +2,16 @@
 import { assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing'
 import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { addAuthorizedPerson, createApartment, createTower } from '../../src/services/censusService'
+import {
+  addAuthorizedPerson,
+  createApartment,
+  createTower,
+  deleteApartment,
+  deleteTower,
+  listActiveAuthorized,
+  updateApartmentOwner,
+  updateTower,
+} from '../../src/services/censusService'
 import { createEnv, dbAs, hasEmulator, seed, UIDS } from './helpers'
 
 describe.skipIf(!hasEmulator)('apartments_authorized (SCRUM-10)', () => {
@@ -69,5 +78,22 @@ describe.skipIf(!hasEmulator)('apartments_authorized (SCRUM-10)', () => {
     await assertFails(setDoc(doc(dbAs(env, UIDS.admin), 'apartments/T9-101'), {
       id: 'T9-101', towerId: 'T9', number: '101', ownerName: 'X', residentUids: [], createdAt: serverTimestamp(),
     }))
+  })
+
+  it('la administradora edita y elimina torres vacías y apartamentos sin residentes', async () => {
+    const admin = dbAs(env, UIDS.admin)
+    await assertSucceeds(createTower(admin, { id: 'T2', name: 'Torre Dos', totalApartments: 20 }))
+    await assertSucceeds(updateTower(admin, 'T2', { name: 'Torre Norte', totalApartments: 24 }))
+    await assertSucceeds(createApartment(admin, { towerId: 'T2', number: '101', ownerName: 'Inicial' }))
+    await assertSucceeds(updateApartmentOwner(admin, 'T2-101', 'Propietario Real'))
+    // No se puede eliminar T2 mientras tenga apartamentos
+    await expect(deleteTower(admin, 'T2')).rejects.toThrow(/tiene apartamentos/)
+    await assertSucceeds(deleteApartment(admin, 'T2-101'))
+    await assertSucceeds(deleteTower(admin, 'T2'))
+  })
+
+  it('el portero lista solo autorizados activos de una unidad (RN-B4)', async () => {
+    const list = await listActiveAuthorized(dbAs(env, UIDS.portero), 'T1-101')
+    expect(list.map((p) => p.documentId).sort()).toEqual(['1001', '2002'])
   })
 })

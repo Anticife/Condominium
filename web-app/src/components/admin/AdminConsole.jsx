@@ -1,173 +1,274 @@
-import React, { useState } from 'react';
-import { 
-  CalendarCheck, 
-  FileCheck, 
-  Users, 
-  BarChart3, 
-  Check, 
-  X, 
-  AlertTriangle, 
-  Search, 
-  CheckCircle2, 
+import React, { useState, useEffect } from 'react';
+import {
+  CalendarCheck,
+  Users,
+  BarChart3,
+  AlertTriangle,
+  Search,
   TrendingUp,
-  FileSpreadsheet,
   Printer,
-  Trash2
+  Plus,
+  Trash2,
+  Building,
+  Home,
+  UserCog,
+  ShieldCheck,
+  Edit3,
+  X,
 } from 'lucide-react';
 import BoardReportModal from './BoardReportModal';
-import CensusUploadModal from './CensusUploadModal';
+import { db } from '../../config/firebase';
+import { listActiveAuthorized, addAuthorizedPerson, setAuthorizedActive } from '../../services/censusService';
+import { AREA_LABELS } from '../../services/reservationSlots';
+import { formatDateCO, formatTimeCO, getElapsedHours, toDate } from '../../services/dateUtils';
 
-export default function AdminConsole({ 
-  state, 
-  onResolveReservation, 
-  onTransitionPqrs, 
-  onImportCensusBatch,
-  onResetData
+export default function AdminConsole({
+  currentUser,
+  towers,
+  apartments,
+  users,
+  packages,
+  reservations,
+  onCreateTower,
+  onUpdateTower,
+  onDeleteTower,
+  onCreateApartment,
+  onUpdateApartmentOwner,
+  onDeleteApartment,
+  onAssignResident,
+  onSetStaffRole,
+  onToggleUserActive,
+  onNotify,
 }) {
-  const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'reservations' | 'pqrs' | 'census'
-
-  // Rejection Modal State
-  const [rejectingReservation, setRejectingReservation] = useState(null);
-  const [rejectionReason, setRejectionReason] = useState('');
-  const [rejectionError, setRejectionError] = useState(null);
-
-  // Resolve PQRS Modal State
-  const [resolvingPqrs, setResolvingPqrs] = useState(null);
-  const [officialResponse, setOfficialResponse] = useState('');
-  const [pqrsResolutionError, setPqrsResolutionError] = useState(null);
-
-  // Census Search & Filters
-  const [censusTowerFilter, setCensusTowerFilter] = useState('ALL');
-  const [censusSearch, setCensusSearch] = useState('');
-  const [importStatusMsg, setImportStatusMsg] = useState(null);
-
-  // Executive Modals State
+  const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'census' | 'users' | 'reservations'
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
-  // ==========================================================================
-  // METRICS COMPUTATION FOR THE BOARD OF DIRECTORS (CONSEJO DE ADMINISTRACIÓN)
-  // ==========================================================================
-  const totalPackages = state.packages.length;
-  const pendingPackages = state.packages.filter(p => p.status === 'Pendiente');
-  const deliveredPackages = state.packages.filter(p => p.status === 'Entregado');
-  
-  // Overdue packages > 15 days (Rule RN-B5: Alerta cobro bodegaje)
-  const overduePackages = pendingPackages.filter(p => {
-    const days = (new Date() - new Date(p.receivedAt)) / (1000 * 60 * 60 * 24);
-    return days >= 15;
-  });
+  // Tower Form State
+  const [towerIdInput, setTowerIdInput] = useState('');
+  const [towerNameInput, setTowerNameInput] = useState('');
+  const [towerCapacityInput, setTowerCapacityInput] = useState('40');
+  const [editingTower, setEditingTower] = useState(null);
 
-  // Average package pickup time in hours (RF-18)
-  let totalPickupHours = 0;
-  deliveredPackages.forEach(p => {
-    if (p.receivedAt && p.deliveredAt) {
-      const diff = (new Date(p.deliveredAt) - new Date(p.receivedAt)) / (1000 * 60 * 60);
-      totalPickupHours += diff;
-    }
-  });
-  const avgPickupHours = deliveredPackages.length > 0 ? (totalPickupHours / deliveredPackages.length).toFixed(1) : 0;
-
-  // PQRS stats
-  const resolvedPqrs = state.pqrs.filter(p => p.status === 'Resuelta');
-  const pqrsResolutionRate = state.pqrs.length > 0 ? Math.round((resolvedPqrs.length / state.pqrs.length) * 100) : 100;
-
-  // Handle Reservation Rejection (Rule RN-B6 / Validation in firestore.rules)
-  const handleConfirmRejection = () => {
-    if (!rejectionReason || rejectionReason.trim().length < 5) {
-      setRejectionError('REGLA OBLIGATORIA: El motivo de rechazo debe contener mínimo 5 caracteres.');
-      return;
-    }
-    onResolveReservation(
-      rejectingReservation.id, 
-      'Rechazada', 
-      rejectionReason.trim(), 
-      'Dra. Patricia Gómez (Administradora)'
-    );
-    setRejectingReservation(null);
-    setRejectionReason('');
-    setRejectionError(null);
-  };
-
-  // Handle PQRS Official Resolution (Rule RN-B6)
-  const handleConfirmPqrsResolution = () => {
-    if (!officialResponse || officialResponse.trim().length < 10) {
-      setPqrsResolutionError('REGLA RN-B6: La respuesta oficial de administración debe contener mínimo 10 caracteres.');
-      return;
-    }
-    onTransitionPqrs(
-      resolvingPqrs.id,
-      'Resuelta',
-      officialResponse.trim(),
-      'Dra. Patricia Gómez (Administradora)'
-    );
-    setResolvingPqrs(null);
-    setOfficialResponse('');
-    setPqrsResolutionError(null);
-  };
+  // Apartment Form State
+  const [aptTowerId, setAptTowerId] = useState('');
+  const [aptNumberInput, setAptNumberInput] = useState('');
+  const [aptOwnerInput, setAptOwnerInput] = useState('');
+  const [editingApt, setEditingApt] = useState(null);
+  const [editingAptOwner, setEditingAptOwner] = useState('');
 
   // Census Filter
-  const filteredApartments = state.apartments.filter(a => {
+  const [censusTowerFilter, setCensusTowerFilter] = useState('ALL');
+  const [censusSearch, setCensusSearch] = useState('');
+
+  // Apartment Authorized Drawer/Modal
+  const [aptAuthModal, setAptAuthModal] = useState(null); // { apartment, list, loading }
+  const [newAuthName, setNewAuthName] = useState('');
+  const [newAuthDoc, setNewAuthDoc] = useState('');
+  const [newAuthRelation, setNewAuthRelation] = useState('Familiar');
+
+  // User Assignment Modal State
+  const [assigningUser, setAssigningUser] = useState(null);
+  const [assignAptId, setAssignAptId] = useState('');
+  const [assignFullName, setAssignFullName] = useState('');
+  const [assignDocumentId, setAssignDocumentId] = useState('');
+  const [userSearch, setUserSearch] = useState('');
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const effectiveAptTowerId =
+    aptTowerId && towers.some((t) => t.id === aptTowerId) ? aptTowerId : towers[0]?.id || '';
+
+  // Metrics
+  const totalPackages = packages.length;
+  const pendingPackages = packages.filter((p) => p.status === 'Pendiente');
+  const deliveredPackages = packages.filter((p) => p.status === 'Entregado');
+  const deliveryRate = totalPackages > 0 ? Math.round((deliveredPackages.length / totalPackages) * 100) : 0;
+
+  const overduePackages = pendingPackages.filter((p) => getElapsedHours(p.receivedAt, nowMs) >= 15 * 24);
+
+  let totalPickupHours = 0;
+  let countedDelivered = 0;
+  deliveredPackages.forEach((p) => {
+    const rec = toDate(p.receivedAt);
+    const del = toDate(p.deliveredAt);
+    if (rec && del) {
+      totalPickupHours += Math.max(0, (del.getTime() - rec.getTime()) / (1000 * 60 * 60));
+      countedDelivered++;
+    }
+  });
+  const avgPickupHours = countedDelivered > 0 ? (totalPickupHours / countedDelivered).toFixed(1) : '0.0';
+
+  const handleTowerSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await onCreateTower({
+        id: towerIdInput.trim(),
+        name: towerNameInput.trim(),
+        totalApartments: Number.parseInt(towerCapacityInput, 10),
+      });
+      setTowerIdInput('');
+      setTowerNameInput('');
+      setTowerCapacityInput('40');
+    } catch (err) {
+      onNotify('error', err?.message || 'Error al crear la torre.');
+    }
+  };
+
+  const handleSaveTowerEdit = async (e) => {
+    e.preventDefault();
+    if (!editingTower) return;
+    try {
+      await onUpdateTower(editingTower.id, {
+        name: editingTower.name,
+        totalApartments: Number.parseInt(String(editingTower.totalApartments), 10),
+      });
+      setEditingTower(null);
+    } catch (err) {
+      onNotify('error', err?.message || 'Error al actualizar torre.');
+    }
+  };
+
+  const handleApartmentSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await onCreateApartment({
+        towerId: effectiveAptTowerId,
+        number: aptNumberInput.trim(),
+        ownerName: aptOwnerInput.trim(),
+      });
+      setAptNumberInput('');
+      setAptOwnerInput('');
+    } catch (err) {
+      onNotify('error', err?.message || 'Error al crear el apartamento.');
+    }
+  };
+
+  const handleOpenAptAuth = async (apt) => {
+    setAptAuthModal({ apartment: apt, list: [], loading: true });
+    try {
+      const list = await listActiveAuthorized(db, apt.id);
+      setAptAuthModal({ apartment: apt, list, loading: false });
+    } catch (err) {
+      setAptAuthModal({ apartment: apt, list: [], loading: false });
+      onNotify('error', err?.message || 'Error consultando autorizados.');
+    }
+  };
+
+  const handleAdminAddAuthorized = async (e) => {
+    e.preventDefault();
+    if (!aptAuthModal) return;
+    try {
+      await addAuthorizedPerson(db, aptAuthModal.apartment.id, {
+        fullName: newAuthName,
+        documentId: newAuthDoc,
+        relation: newAuthRelation,
+      });
+      const updated = await listActiveAuthorized(db, aptAuthModal.apartment.id);
+      setAptAuthModal((prev) => ({ ...prev, list: updated }));
+      setNewAuthName('');
+      setNewAuthDoc('');
+      onNotify('success', `Persona autorizada agregada a ${aptAuthModal.apartment.id}.`);
+    } catch (err) {
+      onNotify('error', err?.message || 'Error al registrar autorizado.');
+    }
+  };
+
+  const handleAdminDeactivateAuth = async (authId) => {
+    if (!aptAuthModal) return;
+    try {
+      await setAuthorizedActive(db, aptAuthModal.apartment.id, authId, false);
+      const updated = await listActiveAuthorized(db, aptAuthModal.apartment.id);
+      setAptAuthModal((prev) => ({ ...prev, list: updated }));
+      onNotify('info', 'Autorización desactivada.');
+    } catch (err) {
+      onNotify('error', err?.message || 'No se pudo desactivar.');
+    }
+  };
+
+  const handleConfirmAssignResident = async (e) => {
+    e.preventDefault();
+    if (!assigningUser) return;
+    try {
+      await onAssignResident({
+        userId: assigningUser.uid,
+        apartmentId: assignAptId,
+        fullName: assignFullName,
+        documentId: assignDocumentId,
+      });
+      setAssigningUser(null);
+      setAssignDocumentId('');
+    } catch (err) {
+      onNotify('error', err?.message || 'Error al asignar unidad al residente.');
+    }
+  };
+
+  const filteredApartments = apartments.filter((a) => {
     if (censusTowerFilter !== 'ALL' && a.towerId !== censusTowerFilter) return false;
-    if (censusSearch) {
-      const q = censusSearch.toLowerCase();
+    if (censusSearch.trim()) {
+      const q = censusSearch.trim().toLowerCase();
       return (
         a.id.toLowerCase().includes(q) ||
-        a.ownerName.toLowerCase().includes(q) ||
-        a.email.toLowerCase().includes(q)
+        (a.ownerName || '').toLowerCase().includes(q) ||
+        a.towerId.toLowerCase().includes(q)
       );
     }
     return true;
   });
 
-  // Batch Import Simulation & Firestore Seeding
-  const handleSimulateBatchImport = async () => {
-    setImportStatusMsg('Sincronizando censo y sembrando en Cloud Firestore...');
-    if (onImportCensusBatch) {
-      await onImportCensusBatch();
-    }
-    setImportStatusMsg('✔ 240 Apartamentos y 3 Torres sincronizados con Cloud Firestore (CON-13 / RF-04).');
-    setTimeout(() => setImportStatusMsg(null), 5000);
-  };
+  const filteredUsers = users.filter((u) => {
+    if (!userSearch.trim()) return true;
+    const q = userSearch.trim().toLowerCase();
+    return (
+      (u.email || '').toLowerCase().includes(q) ||
+      (u.displayName || '').toLowerCase().includes(q) ||
+      (u.unitId || '').toLowerCase().includes(q) ||
+      (u.role || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px' }}>
       {/* Console Header */}
-      <div style={{ 
-        borderBottom: '1px solid #e0e0e0', 
-        paddingBottom: '16px', 
+      <div style={{
+        borderBottom: '1px solid #e0e0e0',
+        paddingBottom: '16px',
         marginBottom: '24px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'flex-end',
         flexWrap: 'wrap',
-        gap: '12px'
+        gap: '12px',
       }}>
         <div>
           <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', color: '#0f62fe', fontWeight: 600 }}>
-            PANEL DIRECTIVO // CONDOMINIUM-F6236 // CONSEJO DE ADMINISTRACIÓN
+            PANEL DE ADMINISTRACIÓN // CONDOMINIUM-F6236
           </div>
           <h1 style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>
-            Consola de Gestión Administrativa & Gobierno
+            Gestión Operativa, Censo y Control de Acceso
           </h1>
           <p style={{ fontSize: '13px', color: '#525252', marginTop: '2px' }}>
-            Aprobación justificada de reservas, resolución legal de PQRS (RN-B6), auditoría de censo y analítica para el consejo.
+            Administración real en Cloud Firestore: torres, apartamentos, cuentas, roles (CON-01 / CON-02) y telemetría operativa.
           </p>
         </div>
 
-        {/* Console Subnavigation Tabs */}
-        <div style={{ display: 'flex', border: '1px solid #8d8d8d' }}>
+        {/* Subnavigation Tabs */}
+        <div style={{ display: 'flex', border: '1px solid #8d8d8d', flexWrap: 'wrap' }}>
           {[
-            { id: 'dashboard', label: 'Métricas del Consejo', icon: BarChart3 },
-            { id: 'reservations', label: 'Bandeja Reservas', icon: CalendarCheck, badge: state.reservations.filter(r => r.status === 'Pendiente').length },
-            { id: 'pqrs', label: 'Gestión PQRS', icon: FileCheck, badge: state.pqrs.filter(p => p.status !== 'Resuelta').length },
-            { id: 'census', label: 'Censo 240 Aptos', icon: Users }
-          ].map(tab => {
+            { id: 'dashboard', label: 'Métricas', icon: BarChart3 },
+            { id: 'census', label: `Censo (${apartments.length} Aptos)`, icon: Building },
+            { id: 'users', label: `Usuarios y Roles (${users.length})`, icon: UserCog },
+            { id: 'reservations', label: 'Reservas', icon: CalendarCheck, badge: reservations.filter((r) => r.status === 'Pendiente').length },
+          ].map((tab) => {
             const Icon = tab.icon;
             const isActive = adminTab === tab.id;
             return (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setAdminTab(tab.id)}
                 style={{
                   display: 'flex',
@@ -180,19 +281,19 @@ export default function AdminConsole({
                   backgroundColor: isActive ? '#161616' : '#ffffff',
                   color: isActive ? '#ffffff' : '#161616',
                   border: 'none',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
                 }}
               >
                 <Icon size={14} />
                 <span>{tab.label}</span>
                 {tab.badge > 0 && (
-                  <span style={{ 
-                    backgroundColor: isActive ? '#0f62fe' : '#f1c21b', 
+                  <span style={{
+                    backgroundColor: isActive ? '#0f62fe' : '#f1c21b',
                     color: isActive ? '#ffffff' : '#161616',
                     padding: '0 5px',
                     fontSize: '10px',
                     fontFamily: 'var(--cds-font-mono)',
-                    fontWeight: 600
+                    fontWeight: 600,
                   }}>
                     {tab.badge}
                   </span>
@@ -203,90 +304,79 @@ export default function AdminConsole({
         </div>
       </div>
 
-      {/* ==========================================================================
-          TAB 1: DASHBOARD DE MÉTRICAS DEL CONSEJO (RF-18, RN-B5, AUDITORÍA)
-          ========================================================================== */}
+      {/* TAB 1: DASHBOARD */}
       {adminTab === 'dashboard' && (
         <div>
-          {/* Executive Action Toolbar */}
           <div style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
             backgroundColor: '#ffffff',
             border: '1px solid #e0e0e0',
             padding: '12px 16px',
-            marginBottom: '20px'
+            marginBottom: '20px',
           }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: '14px', color: '#161616' }}>
-                Métricas de Rendimiento & Cumplimiento Normativo
+                Indicadores Operativos en Tiempo Real
               </div>
               <div style={{ fontSize: '12px', color: '#525252' }}>
-                Auditoría en tiempo real para el Consejo de Administración según Ley 675 y reglas RN-B1..RN-B7.
+                Cálculos directos sobre colecciones activas en Cloud Firestore.
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '8px' }}>
-              {onResetData && (
-                <button
-                  type="button"
-                  className="cds-btn cds-btn-danger"
-                  style={{ height: '36px', fontSize: '12px' }}
-                  onClick={onResetData}
-                  title="Eliminar todos los datos de prueba y restablecer estado limpio"
-                >
-                  <Trash2 size={15} />
-                  <span>Purgar Datos de Prueba</span>
-                </button>
-              )}
-              <button
-                type="button"
-                className="cds-btn cds-btn-primary"
-                style={{ height: '36px', fontSize: '12px' }}
-                onClick={() => setIsReportModalOpen(true)}
-              >
-                <Printer size={15} />
-                <span>Generar Informe Ejecutivo para el Consejo (SCRUM-41)</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              className="cds-btn cds-btn-primary"
+              style={{ height: '36px', minHeight: '36px', fontSize: '12px' }}
+              onClick={() => setIsReportModalOpen(true)}
+            >
+              <Printer size={15} />
+              <span>Imprimir Resumen Ejecutivo</span>
+            </button>
           </div>
 
-          {/* Executive KPI Cards Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-            
-            {/* KPI 1: Encomiendas Totales */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '4px solid #0f62fe' }}>
               <div style={{ fontSize: '11px', color: '#525252', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)' }}>
-                Flujo Mensual Encomiendas
+                Estructura Activa
+              </div>
+              <div style={{ fontSize: '32px', fontWeight: 600, color: '#161616', margin: '8px 0 4px', fontFamily: 'var(--cds-font-mono)' }}>
+                {apartments.length}
+              </div>
+              <div style={{ fontSize: '12px', color: '#525252' }}>
+                Apartamentos en {towers.length} {towers.length === 1 ? 'torre' : 'torres'}
+              </div>
+            </div>
+
+            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '4px solid #24a148' }}>
+              <div style={{ fontSize: '11px', color: '#525252', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)' }}>
+                Flujo de Paquetería
               </div>
               <div style={{ fontSize: '32px', fontWeight: 600, color: '#161616', margin: '8px 0 4px', fontFamily: 'var(--cds-font-mono)' }}>
                 {totalPackages}
               </div>
               <div style={{ fontSize: '12px', color: '#0e6027', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <TrendingUp size={14} />
-                <span>{deliveredPackages.length} entregados ({Math.round((deliveredPackages.length/totalPackages)*100)}%)</span>
+                <span>{deliveredPackages.length} entregados ({deliveryRate}%)</span>
               </div>
             </div>
 
-            {/* KPI 2: Tiempo Medio de Retiro (RF-18) */}
             <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '4px solid #0043ce' }}>
               <div style={{ fontSize: '11px', color: '#525252', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)' }}>
-                Tiempo Medio Retiro (RF-18)
+                Tiempo Medio Retiro
               </div>
               <div style={{ fontSize: '32px', fontWeight: 600, color: '#0043ce', margin: '8px 0 4px', fontFamily: 'var(--cds-font-mono)' }}>
-                {avgPickupHours} <span style={{ fontSize: '16px', fontWeight: 400 }}>horas</span>
+                {avgPickupHours} <span style={{ fontSize: '16px', fontWeight: 400 }}>hrs</span>
               </div>
               <div style={{ fontSize: '12px', color: '#525252' }}>
-                Recepción hasta entrega en ventanilla
+                Desde llegada en portería hasta entrega
               </div>
             </div>
 
-            {/* KPI 3: Alerta Bodegaje >15d (RN-B5) */}
-            <div className="cds-tile" style={{ 
-              backgroundColor: overduePackages.length > 0 ? '#fff1f1' : '#ffffff', 
-              borderTop: '4px solid #da1e28' 
-            }}>
+            <div className="cds-tile" style={{ backgroundColor: overduePackages.length > 0 ? '#fff1f1' : '#ffffff', borderTop: '4px solid #da1e28' }}>
               <div style={{ fontSize: '11px', color: '#a2191f', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)', fontWeight: 600 }}>
                 Alerta Bodegaje &gt;15D (RN-B5)
               </div>
@@ -294,80 +384,52 @@ export default function AdminConsole({
                 {overduePackages.length}
               </div>
               <div style={{ fontSize: '12px', color: '#a2191f' }}>
-                {overduePackages.length > 0 ? 'Aplica cobro de custodia de $5.000/día' : 'Sin paquetes vencidos'}
-              </div>
-            </div>
-
-            {/* KPI 4: Tasa de Resolución PQRS */}
-            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '4px solid #24a148' }}>
-              <div style={{ fontSize: '11px', color: '#525252', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)' }}>
-                Efectividad PQRS (RN-B6)
-              </div>
-              <div style={{ fontSize: '32px', fontWeight: 600, color: '#24a148', margin: '8px 0 4px', fontFamily: 'var(--cds-font-mono)' }}>
-                {pqrsResolutionRate}%
-              </div>
-              <div style={{ fontSize: '12px', color: '#525252' }}>
-                {resolvedPqrs.length} resueltas con acto oficial
+                {overduePackages.length > 0 ? 'Paquetes superan 15 días en portería' : 'Sin paquetes vencidos'}
               </div>
             </div>
           </div>
 
-          {/* CRITICAL ALERT SECTION: Overdue Packages Table (RN-B5) */}
-          <div className="cds-tile" style={{ backgroundColor: '#ffffff', marginBottom: '24px' }}>
+          <div className="cds-tile" style={{ backgroundColor: '#ffffff' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <AlertTriangle color="#da1e28" size={18} />
                 <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#161616' }}>
-                  Auditoría de Paquetería Vencida en Portería (Regla RN-B5: &gt;15 Días)
+                  Auditoría de Paquetería Vencida (Regla RN-B5: &gt;15 Días)
                 </h3>
               </div>
-              <span className="cds-tag cds-tag-red">SANCIÓN / BODEGAJE APLICABLE</span>
+              <span className="cds-tag cds-tag-red">BODEGAJE</span>
             </div>
 
             {overduePackages.length === 0 ? (
               <div style={{ padding: '20px', textAlign: 'center', color: '#0e6027', backgroundColor: '#defbe6', fontSize: '13px' }}>
-                ✔ No hay encomiendas que superen los 15 días reglamentarios en este periodo.
+                No hay encomiendas que superen los 15 días reglamentarios en este momento.
               </div>
             ) : (
               <div className="cds-table-container">
                 <table className="cds-table">
                   <thead>
                     <tr>
-                      <th>Código Paquete</th>
-                      <th>Apartamento</th>
+                      <th>ID</th>
+                      <th>Unidad</th>
                       <th>Destinatario</th>
                       <th>Días en Portería</th>
                       <th>Transportadora / Guía</th>
-                      <th>Tarifa de Bodegaje Acumulada</th>
-                      <th>Acción Administrativa</th>
+                      <th>Tarifa Estimada</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {overduePackages.map(pkg => {
-                      const days = Math.floor((new Date() - new Date(pkg.receivedAt)) / (1000 * 60 * 60 * 24));
+                    {overduePackages.map((pkg) => {
+                      const days = Math.floor(getElapsedHours(pkg.receivedAt, nowMs) / 24);
                       const fee = (days - 15) * 5000;
-
                       return (
                         <tr key={pkg.id}>
-                          <td className="font-mono" style={{ fontWeight: 600, color: '#da1e28' }}>{pkg.id}</td>
+                          <td className="font-mono">{pkg.id.slice(0, 10)}</td>
                           <td><span className="cds-tag cds-tag-dark">{pkg.apartmentId}</span></td>
                           <td><strong>{pkg.recipientName}</strong></td>
-                          <td>
-                            <span className="cds-tag cds-tag-red font-mono">{days} DÍAS</span>
-                          </td>
-                          <td style={{ fontSize: '12px' }}>{pkg.courier} ({pkg.trackingNumber})</td>
+                          <td><span className="cds-tag cds-tag-red font-mono">{days} DÍAS</span></td>
+                          <td style={{ fontSize: '12px' }}>{pkg.courier} ({pkg.trackingNumber || 'Sin guía'})</td>
                           <td className="font-mono" style={{ fontWeight: 600, color: '#a2191f' }}>
                             ${fee.toLocaleString('es-CO')} COP
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="cds-btn cds-btn-danger"
-                              style={{ height: '30px', padding: '0 10px', fontSize: '11px' }}
-                              onClick={() => alert(`Notificación formal enviada al email del apartamento ${pkg.apartmentId} para cobro en cuenta de cobro de administración.`)}
-                            >
-                              Facturar a Expensas
-                            </button>
                           </td>
                         </tr>
                       );
@@ -380,350 +442,605 @@ export default function AdminConsole({
         </div>
       )}
 
-      {/* ==========================================================================
-          TAB 2: BANDEJA DE APROBACIÓN DE RESERVAS (JUSTIFICACIÓN OBLIGATORIA)
-          ========================================================================== */}
-      {adminTab === 'reservations' && (
+      {/* TAB 2: CENSO REAL (CRUD TORRES Y APARTAMENTOS - CON-02) */}
+      {adminTab === 'census' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Forms Row: Create Tower + Create Apartment */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+            {/* Create Tower */}
+            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #0f62fe' }}>
+              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Building size={16} color="#0f62fe" />
+                Registrar Torre / Bloque
+              </h3>
+              <p style={{ fontSize: '12px', color: '#525252', marginBottom: '14px' }}>
+                Cree dinámicamente las torres o bloques reales de la copropiedad en Firestore.
+              </p>
+
+              <form onSubmit={handleTowerSubmit}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                  <div>
+                    <label className="cds-input-label">CÓDIGO (EJ. T1, BLOQUEA)</label>
+                    <input
+                      type="text"
+                      className="cds-input font-mono"
+                      placeholder="T1"
+                      value={towerIdInput}
+                      onChange={(e) => setTowerIdInput(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="cds-input-label">CAPACIDAD ESTIMADA</label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="cds-input font-mono"
+                      value={towerCapacityInput}
+                      onChange={(e) => setTowerCapacityInput(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <div style={{ marginBottom: '12px' }}>
+                  <label className="cds-input-label">NOMBRE VISIBLE</label>
+                  <input
+                    type="text"
+                    className="cds-input"
+                    placeholder="Ej. Torre Norte / Bloque A"
+                    value={towerNameInput}
+                    onChange={(e) => setTowerNameInput(e.target.value)}
+                    required
+                  />
+                </div>
+                <button type="submit" className="cds-btn cds-btn-primary" style={{ width: '100%' }}>
+                  <span>Guardar Torre en Firestore</span>
+                  <Plus size={16} />
+                </button>
+              </form>
+            </div>
+
+            {/* Create Apartment */}
+            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #24a148' }}>
+              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Home size={16} color="#24a148" />
+                Registrar Apartamento / Unidad
+              </h3>
+              <p style={{ fontSize: '12px', color: '#525252', marginBottom: '14px' }}>
+                El ID determinista (`{'{torre}-{número}'}`) impide unidades duplicadas en la misma torre (CON-02).
+              </p>
+
+              <form onSubmit={handleApartmentSubmit}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                  <div>
+                    <label className="cds-input-label">TORRE</label>
+                    <select
+                      className="cds-select"
+                      value={effectiveAptTowerId}
+                      onChange={(e) => setAptTowerId(e.target.value)}
+                      required
+                    >
+                      {towers.length === 0 ? (
+                        <option value="">Cree primero una torre</option>
+                      ) : (
+                        towers.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.id} — {t.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="cds-input-label">NÚMERO (EJ. 101, 204)</label>
+                    <input
+                      type="text"
+                      className="cds-input font-mono"
+                      placeholder="101"
+                      value={aptNumberInput}
+                      onChange={(e) => setAptNumberInput(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <div style={{ marginBottom: '12px' }}>
+                  <label className="cds-input-label">PROPIETARIO / TITULAR</label>
+                  <input
+                    type="text"
+                    className="cds-input"
+                    placeholder="Nombre completo del propietario o titular"
+                    value={aptOwnerInput}
+                    onChange={(e) => setAptOwnerInput(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="cds-btn cds-btn-primary"
+                  style={{ width: '100%' }}
+                  disabled={towers.length === 0}
+                >
+                  <span>Registrar Unidad</span>
+                  <Plus size={16} />
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* Existing Towers List */}
+          <div className="cds-tile" style={{ backgroundColor: '#ffffff' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px' }}>
+              Torres Registradas en Firestore ({towers.length})
+            </h3>
+            {towers.length === 0 ? (
+              <div style={{ padding: '16px', backgroundColor: '#f4f4f4', fontSize: '13px', color: '#525252' }}>
+                No hay torres registradas aún. Use el formulario superior para crear la primera torre o bloque.
+              </div>
+            ) : (
+              <div className="cds-table-container">
+                <table className="cds-table">
+                  <thead>
+                    <tr>
+                      <th>Código</th>
+                      <th>Nombre</th>
+                      <th>Capacidad Declarada</th>
+                      <th>Aptos Registrados</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {towers.map((t) => {
+                      const count = apartments.filter((a) => a.towerId === t.id).length;
+                      const isEditing = editingTower?.id === t.id;
+                      return (
+                        <tr key={t.id}>
+                          <td className="font-mono" style={{ fontWeight: 600 }}>{t.id}</td>
+                          <td>
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                className="cds-input"
+                                style={{ height: '32px' }}
+                                value={editingTower.name}
+                                onChange={(e) => setEditingTower({ ...editingTower, name: e.target.value })}
+                              />
+                            ) : (
+                              t.name
+                            )}
+                          </td>
+                          <td className="font-mono">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="1"
+                                className="cds-input font-mono"
+                                style={{ height: '32px', width: '90px' }}
+                                value={editingTower.totalApartments}
+                                onChange={(e) => setEditingTower({ ...editingTower, totalApartments: e.target.value })}
+                              />
+                            ) : (
+                              t.totalApartments
+                            )}
+                          </td>
+                          <td className="font-mono">{count}</td>
+                          <td>
+                            {isEditing ? (
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-primary"
+                                  style={{ height: '30px', minHeight: '30px', padding: '0 10px', fontSize: '11px' }}
+                                  onClick={handleSaveTowerEdit}
+                                >
+                                  Guardar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-secondary"
+                                  style={{ height: '30px', minHeight: '30px', padding: '0 10px', fontSize: '11px' }}
+                                  onClick={() => setEditingTower(null)}
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-ghost"
+                                  style={{ height: '28px', minHeight: '28px', padding: '0 8px', fontSize: '12px' }}
+                                  onClick={() => setEditingTower({ ...t })}
+                                >
+                                  <Edit3 size={13} />
+                                  <span>Editar</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-ghost"
+                                  style={{ height: '28px', minHeight: '28px', padding: '0 8px', fontSize: '12px', color: '#da1e28' }}
+                                  onClick={() => onDeleteTower(t.id).catch((err) => onNotify('error', err?.message || 'Error al eliminar torre.'))}
+                                >
+                                  <Trash2 size={13} />
+                                  <span>Eliminar</span>
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Apartments Table */}
+          <div>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '10px',
+              backgroundColor: '#ffffff',
+              border: '1px solid #e0e0e0',
+              borderBottom: 'none',
+              padding: '12px 16px',
+            }}>
+              <div style={{ display: 'flex', border: '1px solid #8d8d8d', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setCensusTowerFilter('ALL')}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    fontFamily: 'var(--cds-font-mono)',
+                    fontWeight: 600,
+                    backgroundColor: censusTowerFilter === 'ALL' ? '#161616' : '#ffffff',
+                    color: censusTowerFilter === 'ALL' ? '#ffffff' : '#525252',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  TODAS ({apartments.length})
+                </button>
+                {towers.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setCensusTowerFilter(t.id)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '12px',
+                      fontFamily: 'var(--cds-font-mono)',
+                      fontWeight: 600,
+                      backgroundColor: censusTowerFilter === t.id ? '#161616' : '#ffffff',
+                      color: censusTowerFilter === t.id ? '#ffffff' : '#525252',
+                      border: 'none',
+                      borderLeft: '1px solid #e0e0e0',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {t.id} ({apartments.filter((a) => a.towerId === t.id).length})
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ position: 'relative', width: '280px' }}>
+                <Search size={14} style={{ position: 'absolute', left: '10px', top: '10px', color: '#8d8d8d' }} />
+                <input
+                  type="text"
+                  className="cds-input"
+                  placeholder="Buscar por unidad o propietario..."
+                  style={{ paddingLeft: '32px', height: '34px', fontSize: '12px' }}
+                  value={censusSearch}
+                  onChange={(e) => setCensusSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="cds-table-container">
+              <table className="cds-table">
+                <thead>
+                  <tr>
+                    <th>ID Unidad</th>
+                    <th>Torre</th>
+                    <th>Número</th>
+                    <th>Propietario / Titular</th>
+                    <th>Residentes Ligados</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredApartments.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ textAlign: 'center', padding: '32px', color: '#8d8d8d' }}>
+                        No hay apartamentos registrados con los filtros actuales.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredApartments.map((apt) => {
+                      const isEditing = editingApt === apt.id;
+                      return (
+                        <tr key={apt.id}>
+                          <td className="font-mono" style={{ fontWeight: 600 }}>{apt.id}</td>
+                          <td className="font-mono">{apt.towerId}</td>
+                          <td className="font-mono">{apt.number}</td>
+                          <td>
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                className="cds-input"
+                                style={{ height: '32px' }}
+                                value={editingAptOwner}
+                                onChange={(e) => setEditingAptOwner(e.target.value)}
+                              />
+                            ) : apt.ownerName ? (
+                              <strong>{apt.ownerName}</strong>
+                            ) : (
+                              <span style={{ color: '#8d8d8d', fontStyle: 'italic' }}>Sin titular asignado</span>
+                            )}
+                          </td>
+                          <td className="font-mono">
+                            <span className={`cds-tag ${apt.residentUids?.length ? 'cds-tag-blue' : 'cds-tag-gray'}`}>
+                              {apt.residentUids?.length || 0} cuentas
+                            </span>
+                          </td>
+                          <td>
+                            {isEditing ? (
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-primary"
+                                  style={{ height: '28px', minHeight: '28px', padding: '0 10px', fontSize: '11px' }}
+                                  onClick={() => {
+                                    onUpdateApartmentOwner(apt.id, editingAptOwner)
+                                      .then(() => setEditingApt(null))
+                                      .catch((err) => onNotify('error', err?.message || 'Error al actualizar.'));
+                                  }}
+                                >
+                                  Guardar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-secondary"
+                                  style={{ height: '28px', minHeight: '28px', padding: '0 10px', fontSize: '11px' }}
+                                  onClick={() => setEditingApt(null)}
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-ghost"
+                                  style={{ height: '28px', minHeight: '28px', padding: '0 8px', fontSize: '12px' }}
+                                  onClick={() => handleOpenAptAuth(apt)}
+                                >
+                                  <ShieldCheck size={13} />
+                                  <span>Autorizados</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-ghost"
+                                  style={{ height: '28px', minHeight: '28px', padding: '0 8px', fontSize: '12px' }}
+                                  onClick={() => {
+                                    setEditingApt(apt.id);
+                                    setEditingAptOwner(apt.ownerName || '');
+                                  }}
+                                >
+                                  <Edit3 size={13} />
+                                  <span>Titular</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-ghost"
+                                  style={{ height: '28px', minHeight: '28px', padding: '0 8px', fontSize: '12px', color: '#da1e28' }}
+                                  onClick={() => onDeleteApartment(apt.id).catch((err) => onNotify('error', err?.message || 'No se pudo eliminar.'))}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: USUARIOS, ROLES Y ASIGNACIÓN DE UNIDADES (CON-01, CON-02, RF-02) */}
+      {adminTab === 'users' && (
         <div>
-          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+            backgroundColor: '#ffffff',
+            border: '1px solid #e0e0e0',
+            borderBottom: 'none',
+            padding: '14px 16px',
+          }}>
             <div>
-              <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>
-                Bandeja de Aprobación de Zonas Comunes
-              </h2>
-              <p style={{ fontSize: '13px', color: '#525252' }}>
-                Control de disponibilidad, verificación de depósitos y rechazo con justificación obligatoria.
+              <h2 style={{ fontSize: '17px', fontWeight: 600 }}>Cuentas Registradas en Firebase Auth &amp; Firestore</h2>
+              <p style={{ fontSize: '12px', color: '#525252' }}>
+                Asigne apartamentos a residentes (habilitándolos en `RN-B4`), designe porteros o active/desactive cuentas (`RF-02`).
               </p>
             </div>
-            <span className="cds-tag cds-tag-blue">RN-B1: BLOQUEO DE CRUCES</span>
+            <div style={{ position: 'relative', width: '280px' }}>
+              <Search size={14} style={{ position: 'absolute', left: '10px', top: '10px', color: '#8d8d8d' }} />
+              <input
+                type="text"
+                className="cds-input"
+                placeholder="Buscar por nombre, correo, rol o unidad..."
+                style={{ paddingLeft: '32px', height: '34px', fontSize: '12px' }}
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+              />
+            </div>
           </div>
 
           <div className="cds-table-container">
             <table className="cds-table">
               <thead>
                 <tr>
-                  <th>Código Solicitud</th>
-                  <th>Apartamento / Residente</th>
-                  <th>Zona Común</th>
-                  <th>Fecha y Horario</th>
-                  <th>Depósito</th>
-                  <th>Estado Actual</th>
-                  <th>Decisión Administrativa</th>
+                  <th>Usuario</th>
+                  <th>Correo</th>
+                  <th>Rol Actual</th>
+                  <th>Unidad</th>
+                  <th>Estado</th>
+                  <th>Gestión</th>
                 </tr>
               </thead>
               <tbody>
-                {state.reservations.length === 0 ? (
+                {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan="7" style={{ textAlign: 'center', padding: '36px', color: '#8d8d8d' }}>
-                      No hay solicitudes de reservas registradas en el sistema.
+                    <td colSpan="6" style={{ textAlign: 'center', padding: '32px', color: '#8d8d8d' }}>
+                      No hay usuarios que coincidan con el filtro.
                     </td>
                   </tr>
                 ) : (
-                  state.reservations.map(res => (
-                    <tr key={res.id}>
-                    <td className="font-mono" style={{ fontWeight: 600 }}>{res.id}</td>
-                    <td>
-                      <div><strong>{res.apartmentId}</strong></div>
-                      <div style={{ fontSize: '11px', color: '#525252' }}>{res.residentName}</div>
-                    </td>
-                    <td>{res.commonAreaName} (Cap: {res.capacity})</td>
-                    <td>
-                      <div>{new Date(res.startTime).toLocaleDateString('es-CO')}</div>
-                      <div style={{ fontSize: '11px', color: '#525252' }}>
-                        {new Date(res.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(res.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    </td>
-                    <td className="font-mono">${res.depositAmount.toLocaleString('es-CO')}</td>
-                    <td>
-                      {res.status === 'Pendiente' && <span className="cds-tag cds-tag-yellow">POR RESOLVER</span>}
-                      {res.status === 'Aprobada' && <span className="cds-tag cds-tag-green">APROBADA</span>}
-                      {res.status === 'Rechazada' && (
-                        <div>
-                          <span className="cds-tag cds-tag-red">RECHAZADA</span>
-                          <div style={{ fontSize: '11px', color: '#a2191f', marginTop: '2px' }}>
-                            {res.rejectionReason}
-                          </div>
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      {res.status === 'Pendiente' ? (
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button
-                            type="button"
-                            className="cds-btn cds-btn-primary"
-                            style={{ height: '32px', padding: '0 12px', fontSize: '12px' }}
-                            onClick={() => onResolveReservation(res.id, 'Aprobada', null, 'Dra. Patricia Gómez')}
-                          >
-                            <Check size={14} />
-                            <span>Aprobar</span>
-                          </button>
+                  filteredUsers.map((u) => {
+                    const isSelf = u.uid === currentUser.uid;
+                    return (
+                      <tr key={u.uid}>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{u.displayName || 'Sin nombre'}</div>
+                          <div className="font-mono" style={{ fontSize: '10px', color: '#8d8d8d' }}>{u.uid}</div>
+                        </td>
+                        <td className="font-mono" style={{ fontSize: '12px' }}>{u.email}</td>
+                        <td>
+                          <span className={`cds-tag ${u.role === 'administradora' ? 'cds-tag-blue' : u.role === 'portero' ? 'cds-tag-dark' : 'cds-tag-green'}`}>
+                            {u.role}
+                          </span>
+                        </td>
+                        <td className="font-mono">{u.unitId || '—'}</td>
+                        <td>
+                          <span className={`cds-tag ${u.isActive ? 'cds-tag-green' : 'cds-tag-red'}`}>
+                            {u.isActive ? 'ACTIVO' : 'INACTIVO'}
+                          </span>
+                        </td>
+                        <td>
+                          {isSelf ? (
+                            <span style={{ fontSize: '11px', color: '#8d8d8d' }}>Sesión actual (protegida)</span>
+                          ) : (
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="cds-btn cds-btn-primary"
+                                style={{ height: '28px', minHeight: '28px', padding: '0 10px', fontSize: '11px' }}
+                                disabled={apartments.length === 0}
+                                onClick={() => {
+                                  setAssigningUser(u);
+                                  setAssignAptId(u.unitId || apartments[0]?.id || '');
+                                  setAssignFullName(u.displayName || '');
+                                  setAssignDocumentId('');
+                                }}
+                              >
+                                <Users size={12} />
+                                <span>Asignar Apto</span>
+                              </button>
 
-                          <button
-                            type="button"
-                            className="cds-btn cds-btn-danger"
-                            style={{ height: '32px', padding: '0 12px', fontSize: '12px' }}
-                            onClick={() => {
-                              setRejectingReservation(res);
-                              setRejectionReason('');
-                              setRejectionError(null);
-                            }}
-                          >
-                            <X size={14} />
-                            <span>Rechazar</span>
-                          </button>
-                        </div>
-                      ) : (
-                        <span style={{ fontSize: '12px', color: '#8d8d8d' }}>
-                          Resuelto por {res.resolvedBy || 'Administración'}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                )))}
+                              {u.role !== 'portero' && (
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-secondary"
+                                  style={{ height: '28px', minHeight: '28px', padding: '0 10px', fontSize: '11px' }}
+                                  onClick={() => onSetStaffRole(u.uid, 'portero').catch((err) => onNotify('error', err?.message || 'Error cambiando rol.'))}
+                                >
+                                  Hacer Portero
+                                </button>
+                              )}
+
+                              {u.role !== 'administradora' && (
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-ghost"
+                                  style={{ height: '28px', minHeight: '28px', padding: '0 8px', fontSize: '11px' }}
+                                  onClick={() => onSetStaffRole(u.uid, 'administradora').catch((err) => onNotify('error', err?.message || 'Error cambiando rol.'))}
+                                >
+                                  Hacer Admin
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                className={`cds-btn ${u.isActive ? 'cds-btn-danger' : 'cds-btn-ghost'}`}
+                                style={{ height: '28px', minHeight: '28px', padding: '0 10px', fontSize: '11px' }}
+                                onClick={() => onToggleUserActive(u.uid, !u.isActive).catch((err) => onNotify('error', err?.message || 'Error cambiando estado.'))}
+                              >
+                                {u.isActive ? 'Desactivar' : 'Reactivar'}
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* ==========================================================================
-          TAB 3: GESTIÓN DE PQRS (RESPUESTA OFICIAL OBLIGATORIA RN-B6)
-          ========================================================================== */}
-      {adminTab === 'pqrs' && (
+      {/* TAB 4: RESERVAS (Vista en vivo desde Firestore; resolución CON-07 en Sprint 2) */}
+      {adminTab === 'reservations' && (
         <div>
-          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
             <div>
               <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>
-                Bandeja de PQRS y Radicados Oficiales
+                Solicitudes de Reserva en Cloud Firestore ({reservations.length})
               </h2>
               <p style={{ fontSize: '13px', color: '#525252' }}>
-                Cumplimiento de la regla RN-B6: resolución obligatoria motivada e historial inmutable de auditoría.
+                Solicitudes radicadas bajo RN-B1, RN-B2 y RN-B3. El flujo de aprobación/rechazo con motivo (`CON-07`) se habilitará en Sprint 2.
               </p>
             </div>
-            <span className="cds-tag cds-tag-green">RN-B6: RESPUESTA FORMAL VINCULANTE</span>
+            <span className="cds-tag cds-tag-blue">SPRINT 2: CON-07</span>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {state.pqrs.length === 0 ? (
-              <div className="cds-tile" style={{ textAlign: 'center', padding: '48px', color: '#8d8d8d', backgroundColor: '#ffffff' }}>
-                <FileCheck size={32} style={{ margin: '0 auto 10px', display: 'block', opacity: 0.5 }} />
-                No hay radicados PQRS registrados en el sistema.
-              </div>
-            ) : (
-              state.pqrs.map(ticket => (
-                <div key={ticket.id} className="cds-tile" style={{ backgroundColor: '#ffffff' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                  <div>
-                    <span className="cds-tag cds-tag-dark font-mono">{ticket.ticketNumber}</span>
-                    <span className="cds-tag cds-tag-blue" style={{ marginLeft: '6px' }}>{ticket.category}</span>
-                    <span className="cds-tag cds-tag-gray" style={{ marginLeft: '6px' }}>Apto: {ticket.apartmentId}</span>
-                    <h3 style={{ fontSize: '17px', fontWeight: 600, marginTop: '8px' }}>{ticket.subject}</h3>
-                    <div style={{ fontSize: '12px', color: '#525252' }}>
-                      Radicado por: <strong>{ticket.residentName}</strong> el {new Date(ticket.createdAt).toLocaleString('es-CO')}
-                    </div>
-                  </div>
-
-                  <div>
-                    {ticket.status === 'Radicada' && <span className="cds-tag cds-tag-yellow">RADICADA</span>}
-                    {ticket.status === 'En gestión' && <span className="cds-tag cds-tag-blue">EN GESTIÓN</span>}
-                    {ticket.status === 'Resuelta' && <span className="cds-tag cds-tag-green">RESUELTA</span>}
-                  </div>
-                </div>
-
-                <div style={{ backgroundColor: '#f4f4f4', padding: '12px 14px', fontSize: '13px', marginBottom: '16px' }}>
-                  {ticket.description}
-                </div>
-
-                {/* Official Response */}
-                {ticket.officialResponse && (
-                  <div style={{
-                    backgroundColor: '#defbe6',
-                    borderLeft: '4px solid #24a148',
-                    padding: '12px 14px',
-                    marginBottom: '16px'
-                  }}>
-                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#0e6027', marginBottom: '4px' }}>
-                      RESPUESTA OFICIAL DE ADMINISTRACIÓN (RN-B6):
-                    </div>
-                    <div style={{ fontSize: '13px', color: '#161616' }}>
-                      {ticket.officialResponse}
-                    </div>
-                  </div>
-                )}
-
-                {/* Audit Timeline */}
-                <div style={{ borderTop: '1px solid #e0e0e0', paddingTop: '10px', fontSize: '11px', color: '#8d8d8d', marginBottom: '16px' }}>
-                  <strong>Línea de tiempo inmutable:</strong>
-                  {ticket.history.map((h, i) => (
-                    <div key={i} style={{ marginTop: '2px' }}>
-                      • {new Date(h.changedAt).toLocaleString('es-CO')}: {h.comment} (Operador: {h.changedBy})
-                    </div>
-                  ))}
-                </div>
-
-                {/* Action Buttons */}
-                {ticket.status !== 'Resuelta' && (
-                  <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid #e0e0e0', paddingTop: '12px' }}>
-                    {ticket.status === 'Radicada' && (
-                      <button
-                        type="button"
-                        className="cds-btn cds-btn-secondary"
-                        style={{ height: '34px', padding: '0 12px', fontSize: '12px' }}
-                        onClick={() => onTransitionPqrs(ticket.id, 'En gestión', null, 'Dra. Patricia Gómez')}
-                      >
-                        Pasar a 'En Gestión'
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      className="cds-btn cds-btn-primary"
-                      style={{ height: '34px', padding: '0 12px', fontSize: '12px' }}
-                      onClick={() => {
-                        setResolvingPqrs(ticket);
-                        setOfficialResponse('');
-                        setPqrsResolutionError(null);
-                      }}
-                    >
-                      <CheckCircle2 size={14} />
-                      <span>Emitir Respuesta Oficial y Resolver (RN-B6)</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )))}
-          </div>
-        </div>
-      )}
-
-      {/* ==========================================================================
-          TAB 4: CENSO DE 240 APARTAMENTOS (3 TORRES // CON-13 BATCH)
-          ========================================================================== */}
-      {adminTab === 'census' && (
-        <div>
-          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-            <div>
-              <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>
-                Censo de Copropiedad: 240 Unidades
-              </h2>
-              <p style={{ fontSize: '13px', color: '#525252' }}>
-                Torres 1, 2 y 3 (80 apartamentos por torre). Base de datos unificada de residentes y autorizados.
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button
-                type="button"
-                className="cds-btn cds-btn-primary"
-                style={{ height: '36px', fontSize: '12px' }}
-                onClick={() => setIsUploadModalOpen(true)}
-              >
-                <FileSpreadsheet size={15} />
-                <span>Carga Masiva Excel & Previsualización (SCRUM-44)</span>
-              </button>
-            </div>
-          </div>
-
-          {importStatusMsg && (
-            <div style={{
-              backgroundColor: '#defbe6',
-              border: '1px solid #6fdc8c',
-              color: '#0e6027',
-              padding: '10px 14px',
-              fontSize: '13px',
-              marginBottom: '16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontWeight: 500
-            }}>
-              <CheckCircle2 size={16} />
-              {importStatusMsg}
-            </div>
-          )}
-
-          {/* Census Filter Toolbar */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: '#ffffff',
-            border: '1px solid #e0e0e0',
-            borderBottom: 'none',
-            padding: '12px 16px'
-          }}>
-            <div style={{ display: 'flex', border: '1px solid #8d8d8d' }}>
-              {['ALL', 'T1', 'T2', 'T3'].map(tf => (
-                <button
-                  key={tf}
-                  onClick={() => setCensusTowerFilter(tf)}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    fontFamily: 'var(--cds-font-mono)',
-                    fontWeight: 600,
-                    backgroundColor: censusTowerFilter === tf ? '#161616' : '#ffffff',
-                    color: censusTowerFilter === tf ? '#ffffff' : '#525252',
-                    border: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {tf === 'ALL' ? '3 Torres (240 Aptos)' : `Torre ${tf.replace('T', '')} (80 Aptos)`}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ position: 'relative', width: '280px' }}>
-              <Search size={14} style={{ position: 'absolute', left: '10px', top: '10px', color: '#8d8d8d' }} />
-              <input
-                type="text"
-                className="cds-input"
-                placeholder="Buscar por apto, nombre o email..."
-                style={{ paddingLeft: '32px', height: '34px', fontSize: '12px' }}
-                value={censusSearch}
-                onChange={(e) => setCensusSearch(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* Census Table */}
-          <div className="cds-table-container" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+          <div className="cds-table-container">
             <table className="cds-table">
               <thead>
                 <tr>
-                  <th>Unidad / Apto</th>
-                  <th>Torre</th>
-                  <th>Propietario Titular</th>
-                  <th>Correo Institucional</th>
-                  <th>Teléfono</th>
-                  <th>Autorizados Registrados</th>
+                  <th>ID</th>
+                  <th>Unidad</th>
+                  <th>Zona Común</th>
+                  <th>Fecha y Franja</th>
+                  <th>Estado</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredApartments.length === 0 ? (
+                {reservations.length === 0 ? (
                   <tr>
-                    <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#8d8d8d' }}>
-                      No hay apartamentos que coincidan con los filtros aplicados.
+                    <td colSpan="5" style={{ textAlign: 'center', padding: '36px', color: '#8d8d8d' }}>
+                      No hay solicitudes de reserva registradas en Firestore.
                     </td>
                   </tr>
                 ) : (
-                  filteredApartments.slice(0, 50).map(apt => (
-                    <tr key={apt.id}>
-                      <td className="font-mono" style={{ fontWeight: 600 }}>{apt.id}</td>
-                      <td>{apt.towerName}</td>
+                  reservations.map((res) => (
+                    <tr key={res.id}>
+                      <td className="font-mono" style={{ fontWeight: 600 }}>{res.id.slice(0, 10)}</td>
+                      <td className="font-mono"><strong>{res.apartmentId}</strong></td>
+                      <td>{AREA_LABELS[res.commonArea] || res.commonArea} ({res.slot})</td>
                       <td>
-                        {apt.ownerName ? (
-                          <strong>{apt.ownerName}</strong>
-                        ) : (
-                          <span style={{ color: '#8d8d8d', fontStyle: 'italic' }}>Sin asignar (Pendiente Censo)</span>
-                        )}
+                        <div>{res.date || formatDateCO(res.startTime)}</div>
+                        <div style={{ fontSize: '11px', color: '#525252' }}>
+                          {formatTimeCO(res.startTime)} - {formatTimeCO(res.endTime)}
+                        </div>
                       </td>
-                      <td className="font-mono" style={{ fontSize: '12px' }}>{apt.email || '—'}</td>
-                      <td className="font-mono">{apt.phone || '—'}</td>
                       <td>
-                        <span className={`cds-tag ${apt.authorized && apt.authorized.length > 0 ? 'cds-tag-blue' : 'cds-tag-gray'}`}>
-                          {apt.authorized ? apt.authorized.length : 0} personas
-                        </span>
+                        {res.status === 'Pendiente' && <span className="cds-tag cds-tag-yellow">PENDIENTE</span>}
+                        {res.status === 'Aprobada' && <span className="cds-tag cds-tag-green">APROBADA</span>}
+                        {res.status === 'Rechazada' && <span className="cds-tag cds-tag-red">RECHAZADA</span>}
                       </td>
                     </tr>
                   ))
@@ -731,129 +1048,131 @@ export default function AdminConsole({
               </tbody>
             </table>
           </div>
-          {filteredApartments.length > 50 && (
-            <div style={{ fontSize: '11px', color: '#8d8d8d', marginTop: '8px', textAlign: 'right' }}>
-              Mostrando primeros 50 de {filteredApartments.length} apartamentos para rendimiento de tabla.
-            </div>
-          )}
         </div>
       )}
 
-      {/* ==========================================================================
-          MODAL DE RECHAZO DE RESERVA (JUSTIFICACIÓN OBLIGATORIA)
-          ========================================================================== */}
-      {rejectingReservation && (
+      {/* Modal: Asignar Unidad a Residente */}
+      {assigningUser && (
         <div className="cds-modal-overlay">
           <div className="cds-modal-content">
             <div style={{ backgroundColor: '#161616', color: '#ffffff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '11px', color: '#ff8389', fontFamily: 'var(--cds-font-mono)' }}>RECHAZO FUNDADO // CONTROL LEGAL</div>
-                <div style={{ fontSize: '16px', fontWeight: 600 }}>Rechazar Solicitud {rejectingReservation.id}</div>
+                <div style={{ fontSize: '11px', color: '#78a9ff', fontFamily: 'var(--cds-font-mono)' }}>ASIGNACIÓN DE UNIDAD // CON-02 &amp; RN-B4</div>
+                <div style={{ fontSize: '16px', fontWeight: 600 }}>Asignar Apartamento a {assigningUser.email}</div>
               </div>
-              <button onClick={() => setRejectingReservation(null)} style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer' }}>
+              <button type="button" onClick={() => setAssigningUser(null)} style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer' }}>
                 <X size={20} />
               </button>
             </div>
+            <form onSubmit={handleConfirmAssignResident}>
+              <div style={{ padding: '20px' }}>
+                <div style={{ marginBottom: '12px' }}>
+                  <label className="cds-input-label">APARTAMENTO</label>
+                  <select className="cds-select font-mono" value={assignAptId} onChange={(e) => setAssignAptId(e.target.value)} required>
+                    {apartments.map((a) => (
+                      <option key={a.id} value={a.id}>{a.id} {a.ownerName ? `— ${a.ownerName}` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ marginBottom: '12px' }}>
+                  <label className="cds-input-label">NOMBRE COMPLETO DEL RESIDENTE</label>
+                  <input type="text" className="cds-input" value={assignFullName} onChange={(e) => setAssignFullName(e.target.value)} required />
+                </div>
+                <div style={{ marginBottom: '12px' }}>
+                  <label className="cds-input-label">N° DOCUMENTO DE IDENTIDAD (PARA ENTREGA RN-B4)</label>
+                  <input type="text" className="cds-input font-mono" placeholder="Ej. 1020304050" value={assignDocumentId} onChange={(e) => setAssignDocumentId(e.target.value)} required />
+                </div>
+              </div>
+              <div style={{ backgroundColor: '#f4f4f4', borderTop: '1px solid #e0e0e0', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                <button type="button" className="cds-btn cds-btn-secondary" onClick={() => setAssigningUser(null)}>Cancelar</button>
+                <button type="submit" className="cds-btn cds-btn-primary">Confirmar Asignación</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
+      {/* Modal: Personas Autorizadas por Unidad */}
+      {aptAuthModal && (
+        <div className="cds-modal-overlay">
+          <div className="cds-modal-content" style={{ maxWidth: '640px' }}>
+            <div style={{ backgroundColor: '#161616', color: '#ffffff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '11px', color: '#78a9ff', fontFamily: 'var(--cds-font-mono)' }}>AUTORIZADOS EN PORTERÍA // RN-B4</div>
+                <div style={{ fontSize: '16px', fontWeight: 600 }}>Unidad {aptAuthModal.apartment.id}</div>
+              </div>
+              <button type="button" onClick={() => setAptAuthModal(null)} style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
             <div style={{ padding: '20px' }}>
-              <p style={{ fontSize: '13px', color: '#525252', marginBottom: '12px' }}>
-                Apartamento solicitante: <strong>{rejectingReservation.apartmentId}</strong> ({rejectingReservation.commonAreaName}).
-              </p>
+              <form onSubmit={handleAdminAddAuthorized} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '8px', marginBottom: '16px', alignItems: 'end' }}>
+                <div>
+                  <label className="cds-input-label">NOMBRE</label>
+                  <input type="text" className="cds-input" value={newAuthName} onChange={(e) => setNewAuthName(e.target.value)} required />
+                </div>
+                <div>
+                  <label className="cds-input-label">DOCUMENTO</label>
+                  <input type="text" className="cds-input font-mono" value={newAuthDoc} onChange={(e) => setNewAuthDoc(e.target.value)} required />
+                </div>
+                <div>
+                  <label className="cds-input-label">PARENTESCO</label>
+                  <input type="text" className="cds-input" value={newAuthRelation} onChange={(e) => setNewAuthRelation(e.target.value)} required />
+                </div>
+                <button type="submit" className="cds-btn cds-btn-primary" style={{ height: '40px', minHeight: '40px' }}>Agregar</button>
+              </form>
 
-              {rejectionError && (
-                <div style={{ backgroundColor: '#fff1f1', border: '1px solid #ffb3b8', color: '#a2191f', padding: '8px 12px', fontSize: '12px', marginBottom: '12px' }}>
-                  {rejectionError}
+              {aptAuthModal.loading ? (
+                <div style={{ fontSize: '12px', color: '#525252' }}>Cargando autorizados...</div>
+              ) : aptAuthModal.list.length === 0 ? (
+                <div style={{ fontSize: '12px', color: '#8d8d8d' }}>Sin personas activas registradas en esta unidad.</div>
+              ) : (
+                <div className="cds-table-container">
+                  <table className="cds-table">
+                    <thead>
+                      <tr>
+                        <th>Nombre</th>
+                        <th>Documento</th>
+                        <th>Relación</th>
+                        <th>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aptAuthModal.list.map((p) => (
+                        <tr key={p.id}>
+                          <td>{p.fullName}</td>
+                          <td className="font-mono">{p.documentId}</td>
+                          <td><span className="cds-tag cds-tag-blue">{p.relation}</span></td>
+                          <td>
+                            <button
+                              type="button"
+                              className="cds-btn cds-btn-ghost"
+                              style={{ height: '26px', minHeight: '26px', padding: '0 8px', color: '#da1e28', fontSize: '11px' }}
+                              onClick={() => handleAdminDeactivateAuth(p.id)}
+                            >
+                              Desactivar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-
-              <label className="cds-input-label">MOTIVO DEL RECHAZO (OBLIGATORIO MÍNIMO 5 CARACTERES):</label>
-              <textarea
-                className="cds-input"
-                style={{ height: '90px', paddingTop: '8px' }}
-                placeholder="Ej. Mantenimiento programado de tuberías en la zona, deuda pendiente en expensas comunes, etc."
-                value={rejectionReason}
-                onChange={(e) => setRejectionReason(e.target.value)}
-                required
-              ></textarea>
-            </div>
-
-            <div style={{ backgroundColor: '#f4f4f4', borderTop: '1px solid #e0e0e0', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button type="button" className="cds-btn cds-btn-secondary" onClick={() => setRejectingReservation(null)}>
-                Cancelar
-              </button>
-              <button type="button" className="cds-btn cds-btn-danger" onClick={handleConfirmRejection}>
-                <X size={16} />
-                <span>Confirmar Rechazo</span>
-              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ==========================================================================
-          MODAL DE RESOLUCIÓN OFICIAL DE PQRS (RN-B6 OBLIGATORIA)
-          ========================================================================== */}
-      {resolvingPqrs && (
-        <div className="cds-modal-overlay">
-          <div className="cds-modal-content">
-            <div style={{ backgroundColor: '#161616', color: '#ffffff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: '11px', color: '#42be65', fontFamily: 'var(--cds-font-mono)' }}>RESPUESTA DE FONDO // RN-B6</div>
-                <div style={{ fontSize: '16px', fontWeight: 600 }}>Emitir Respuesta Oficial a {resolvingPqrs.ticketNumber}</div>
-              </div>
-              <button onClick={() => setResolvingPqrs(null)} style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <div style={{ padding: '20px' }}>
-              <div style={{ backgroundColor: '#f4f4f4', padding: '10px 12px', fontSize: '12px', marginBottom: '14px' }}>
-                <div><strong>Asunto:</strong> {resolvingPqrs.subject}</div>
-                <div><strong>Apto:</strong> {resolvingPqrs.apartmentId} // {resolvingPqrs.residentName}</div>
-              </div>
-
-              {pqrsResolutionError && (
-                <div style={{ backgroundColor: '#fff1f1', border: '1px solid #ffb3b8', color: '#a2191f', padding: '8px 12px', fontSize: '12px', marginBottom: '12px' }}>
-                  {pqrsResolutionError}
-                </div>
-              )}
-
-              <label className="cds-input-label">TEXTO DE RESPUESTA OFICIAL MOTIVADA (MÍNIMO 10 CARACTERES - RN-B6):</label>
-              <textarea
-                className="cds-input"
-                style={{ height: '110px', paddingTop: '8px' }}
-                placeholder="Escriba aquí la respuesta formal que será notificada al residente y quedará fijada en la pista de auditoría inmutable..."
-                value={officialResponse}
-                onChange={(e) => setOfficialResponse(e.target.value)}
-                required
-              ></textarea>
-            </div>
-
-            <div style={{ backgroundColor: '#f4f4f4', borderTop: '1px solid #e0e0e0', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button type="button" className="cds-btn cds-btn-secondary" onClick={() => setResolvingPqrs(null)}>
-                Cancelar
-              </button>
-              <button type="button" className="cds-btn cds-btn-primary" onClick={handleConfirmPqrsResolution}>
-                <CheckCircle2 size={16} />
-                <span>Firmar y Resolver PQRS</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Official Executive Board Report Modal (SCRUM-41) */}
       <BoardReportModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
-        state={state}
-      />
-
-      {/* Batch Census Upload & Validation Modal (SCRUM-44) */}
-      <CensusUploadModal
-        isOpen={isUploadModalOpen}
-        onClose={() => setIsUploadModalOpen(false)}
-        onConfirmSeed={handleSimulateBatchImport}
+        currentUser={currentUser}
+        towers={towers}
+        apartments={apartments}
+        packages={packages}
+        reservations={reservations}
+        nowMs={nowMs}
       />
     </div>
   );

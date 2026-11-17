@@ -11,12 +11,14 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   serverTimestamp,
   Timestamp,
   where,
   writeBatch,
   type Firestore,
+  type Unsubscribe,
 } from 'firebase/firestore'
 import { BusinessRuleError } from './errors'
 import {
@@ -123,6 +125,55 @@ export async function requestReservation(db: Firestore, req: ReservationRequest)
     throw err
   }
   return reservationRef.id
+}
+
+export interface Reservation {
+  id: string
+  commonArea: CommonArea
+  apartmentId: string
+  residentId: string
+  date: string
+  slot: SlotId
+  startTime: Timestamp | null
+  endTime: Timestamp | null
+  status: ReservationStatus
+  createdAt: Timestamp | null
+  rejectionReason?: string
+  resolvedBy?: string
+  resolvedAt?: Timestamp | null
+}
+
+/** Residente: reservas de su apartamento ordenadas de la más reciente a la más antigua. */
+export function subscribeToApartmentReservations(
+  db: Firestore,
+  apartmentId: string,
+  onChange: (reservations: Reservation[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  const q = query(
+    collection(db, 'reservations'),
+    where('apartmentId', '==', apartmentId),
+  )
+  return onSnapshot(q, (snap) => {
+    const items = snap.docs
+      .map((d) => ({ id: d.id, ...(d.data({ serverTimestamps: 'estimate' }) as object) }) as Reservation)
+      .sort((a, b) => (b.startTime?.toMillis?.() ?? 0) - (a.startTime?.toMillis?.() ?? 0))
+    onChange(items)
+  }, onError)
+}
+
+/** Administración: todas las solicitudes de reserva en tiempo real. */
+export function subscribeToAllReservations(
+  db: Firestore,
+  onChange: (reservations: Reservation[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(collection(db, 'reservations'), (snap) => {
+    const items = snap.docs
+      .map((d) => ({ id: d.id, ...(d.data({ serverTimestamps: 'estimate' }) as object) }) as Reservation)
+      .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0))
+    onChange(items)
+  }, onError)
 }
 
 /** Franjas ya aprobadas para una zona y fecha (para pintar el calendario). */

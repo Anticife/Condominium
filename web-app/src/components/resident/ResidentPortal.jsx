@@ -1,75 +1,96 @@
-import React, { useState } from 'react';
-import { 
-  Package, 
-  Calendar, 
-  ShieldCheck, 
-  FileText, 
-  UserPlus, 
-  Trash2, 
-  AlertCircle, 
-  CheckCircle2
+import React, { useState, useEffect } from 'react';
+import {
+  Package,
+  Calendar,
+  ShieldCheck,
+  FileText,
+  UserPlus,
+  Trash2,
+  AlertCircle,
+  CheckCircle2,
+  UserCheck,
 } from 'lucide-react';
+import { db } from '../../config/firebase';
+import {
+  AREA_LABELS,
+  SLOTS,
+  MIN_NOTICE_HOURS,
+} from '../../services/reservationSlots';
+import {
+  getTakenSlots,
+  validateReservationRequest,
+} from '../../services/reservationService';
+import {
+  formatDateCO,
+  formatDateTimeCO,
+  formatTimeCO,
+  getElapsedHours,
+} from '../../services/dateUtils';
 
-export default function ResidentPortal({ 
-  state, 
+export default function ResidentPortal({
   currentUser,
-  onAddReservation, 
-  onAddPqrs, 
-  onAddAuthorized, 
-  onRemoveAuthorized 
+  apartment,
+  authorizedPeople,
+  packages,
+  reservations,
+  onRequestReservation,
+  onAddAuthorized,
+  onToggleAuthorized,
+  onRemoveAuthorized,
+  onUpdateContact,
 }) {
-  // Current logged in resident context (default: Carlos Rodríguez, T1-101)
-  const [activeAptId, setActiveAptId] = useState(() => currentUser?.unitId || 'T1-101');
-  const [activeTab, setActiveTab] = useState('packages'); // 'packages' | 'reservations' | 'authorized' | 'pqrs'
+  const [activeTab, setActiveTab] = useState('packages'); // 'packages' | 'reservations' | 'authorized' | 'profile' | 'pqrs'
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Booking Form State
   const [selectedArea, setSelectedArea] = useState('salon_social');
-  const [selectedSlot, setSelectedSlot] = useState('PM'); // 'AM' | 'PM' (según reservationSlots.ts)
+  const [selectedSlot, setSelectedSlot] = useState('PM');
   const [bookingDate, setBookingDate] = useState('');
+  const [takenSlots, setTakenSlots] = useState([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
   const [bookingError, setBookingError] = useState(null);
   const [bookingSuccess, setBookingSuccess] = useState(null);
+  const [submittingBooking, setSubmittingBooking] = useState(false);
 
   // Authorized Person Form State
   const [newAuthName, setNewAuthName] = useState('');
   const [newAuthDoc, setNewAuthDoc] = useState('');
   const [newAuthPhone, setNewAuthPhone] = useState('');
   const [newAuthRelation, setNewAuthRelation] = useState('Familiar');
+  const [authFormError, setAuthFormError] = useState(null);
+  const [submittingAuth, setSubmittingAuth] = useState(false);
 
-  // PQRS Form State
-  const [pqrsCategory, setPqrsCategory] = useState('Peticion');
-  const [pqrsSubject, setPqrsSubject] = useState('');
-  const [pqrsDescription, setPqrsDescription] = useState('');
-  const [pqrsSuccess, setPqrsSuccess] = useState(null);
+  // Own Contact State
+  const [contactName, setContactName] = useState(currentUser?.displayName || '');
+  const [contactPhone, setContactPhone] = useState(currentUser?.phone || '');
+  const [contactMsg, setContactMsg] = useState(null);
 
-  // Get active apartment details with defensive fallback
-  const defaultFallbackApt = {
-    id: activeAptId || 'T1-101',
-    towerId: (activeAptId && activeAptId.split('-')[0]) || 'T1',
-    towerName: 'Torre 1',
-    number: (activeAptId && activeAptId.split('-')[1]) || '101',
-    ownerName: currentUser?.name || 'Carlos Rodríguez',
-    email: currentUser?.email || 'carlos.rodriguez@altosparque.com',
-    phone: '3101234567',
-    residents: [],
-    authorized: []
-  };
-  const myApartment = state.apartments?.find(a => a.id === activeAptId) || state.apartments?.[0] || defaultFallbackApt;
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
-  // Filter packages for this resident (RN-B7 compliance)
-  const myPackages = state.packages.filter(p => p.apartmentId === myApartment.id);
+  useEffect(() => {
+    if (!bookingDate) return undefined;
+    let cancelled = false;
+    getTakenSlots(db, selectedArea, bookingDate)
+      .then((slots) => {
+        if (!cancelled) setTakenSlots(slots);
+      })
+      .catch(() => {
+        if (!cancelled) setTakenSlots([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSlots(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedArea, bookingDate]);
 
-  // Filter reservations for this resident
-  const myReservations = state.reservations.filter(r => r.apartmentId === myApartment.id);
+  const minDateStr = new Date(nowMs + MIN_NOTICE_HOURS * 60 * 60 * 1000).toISOString().split('T')[0];
 
-  // Filter PQRS for this resident
-  const myPqrs = state.pqrs.filter(p => p.apartmentId === myApartment.id);
-
-  // Calculate 48h minimum date string for datepicker (RN-B2)
-  const min48hDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
-  const minDateStr = min48hDate.toISOString().split('T')[0];
-
-  // Submit Reservation Request (Enforces RN-B1, RN-B2, RN-B3)
-  const handleBookingSubmit = (e) => {
+  const handleBookingSubmit = async (e) => {
     e.preventDefault();
     setBookingError(null);
     setBookingSuccess(null);
@@ -79,130 +100,77 @@ export default function ResidentPortal({
       return;
     }
 
-    const slotTimesConfig = selectedArea === 'salon_social'
-      ? (selectedSlot === 'AM' ? { start: '08:00', end: '14:00' } : { start: '15:00', end: '22:00' })
-      : (selectedSlot === 'AM' ? { start: '10:00', end: '16:00' } : { start: '17:00', end: '22:00' });
-
-    const startDateTime = new Date(`${bookingDate}T${slotTimesConfig.start}:00`);
-    const endDateTime = new Date(`${bookingDate}T${slotTimesConfig.end}:00`);
-    const now = new Date();
-
-    // 1. Validate RN-B2: At least 48 hours in advance
-    const diffHours = (startDateTime - now) / (1000 * 60 * 60);
-    if (diffHours < 48) {
-      setBookingError('REGLA RN-B2 VIOLADA: Toda reserva debe solicitarse con mínimo 48 horas de anticipación.');
-      return;
-    }
-
-    // 2. Validate RN-B3: Max 1 active reservation per month per apartment
-    const bookingMonth = startDateTime.getMonth();
-    const bookingYear = startDateTime.getFullYear();
-    const existingActiveInMonth = myReservations.find(r => {
-      if (r.status === 'Rechazada') return false;
-      const d = new Date(r.startTime);
-      return d.getMonth() === bookingMonth && d.getFullYear() === bookingYear;
-    });
-
-    if (existingActiveInMonth) {
-      setBookingError(`REGLA RN-B3 VIOLADA: Su apartamento ya cuenta con una reserva activa (${existingActiveInMonth.id}) para este mes.`);
-      return;
-    }
-
-    // 3. Validate RN-B1: Check for overlaps in the same common area
-    const hasOverlap = state.reservations.some(r => {
-      if (r.commonArea !== selectedArea || r.status === 'Rechazada') return false;
-      const existingStart = new Date(r.startTime);
-      const existingEnd = new Date(r.endTime);
-      return (startDateTime < existingEnd && endDateTime > existingStart);
-    });
-
-    if (hasOverlap) {
-      setBookingError('REGLA RN-B1 VIOLADA: Ya existe una reserva programada para esa zona común en la franja horaria seleccionada.');
-      return;
-    }
-
-    const newRes = {
-      id: `RES-2026-${Date.now().toString().slice(-4)}`,
+    const req = {
+      residentId: currentUser.uid,
+      apartmentId: currentUser.unitId,
       commonArea: selectedArea,
+      date: bookingDate,
       slot: selectedSlot,
-      commonAreaName: selectedArea === 'salon_social' ? 'Salón Social Comunitario' : 'Zona BBQ & Terraza',
-      capacity: selectedArea === 'salon_social' ? 80 : 30,
-      depositAmount: selectedArea === 'salon_social' ? 200000 : 80000,
-      apartmentId: myApartment.id,
-      residentName: myApartment.ownerName,
-      startTime: startDateTime.toISOString(),
-      endTime: endDateTime.toISOString(),
-      status: 'Pendiente',
-      requestedAt: new Date().toISOString(),
-      rejectionReason: null,
-      resolvedBy: null,
-      resolvedAt: null
     };
 
-    onAddReservation(newRes);
-    setBookingSuccess(`¡Reserva ${newRes.id} radicada exitosamente! Se encuentra en estado 'Pendiente' en espera del visto bueno de Administración.`);
-    setBookingDate('');
+    try {
+      validateReservationRequest(req, new Date(nowMs));
+    } catch (err) {
+      setBookingError(err?.message || 'Datos de reserva inválidos.');
+      return;
+    }
+
+    setSubmittingBooking(true);
+    try {
+      const resId = await onRequestReservation(req);
+      setBookingSuccess(
+        `Solicitud ${resId} radicada en Cloud Firestore para ${AREA_LABELS[selectedArea]} (${bookingDate}, franja ${selectedSlot}).`
+      );
+      setBookingDate('');
+      setTakenSlots([]);
+    } catch (err) {
+      setBookingError(err?.message || 'No se pudo radicar la solicitud de reserva.');
+    } finally {
+      setSubmittingBooking(false);
+    }
   };
 
-  // Submit Authorized Person
-  const handleAddAuthorized = (e) => {
+  const handleAddAuthorizedSubmit = async (e) => {
     e.preventDefault();
-    if (!newAuthName || !newAuthDoc) return;
-
-    const newPerson = {
-      id: `auth-${Date.now()}`,
-      name: newAuthName,
-      doc: newAuthDoc,
-      phone: newAuthPhone || 'No registrado',
-      relation: newAuthRelation
-    };
-
-    onAddAuthorized(myApartment.id, newPerson);
-    setNewAuthName('');
-    setNewAuthDoc('');
-    setNewAuthPhone('');
+    setAuthFormError(null);
+    setSubmittingAuth(true);
+    try {
+      await onAddAuthorized(currentUser.unitId, {
+        fullName: newAuthName,
+        documentId: newAuthDoc,
+        phone: newAuthPhone,
+        relation: newAuthRelation,
+      });
+      setNewAuthName('');
+      setNewAuthDoc('');
+      setNewAuthPhone('');
+    } catch (err) {
+      setAuthFormError(err?.message || 'No se pudo registrar la persona autorizada.');
+    } finally {
+      setSubmittingAuth(false);
+    }
   };
 
-  // Submit PQRS
-  const handlePqrsSubmit = (e) => {
+  const handleSaveContact = async (e) => {
     e.preventDefault();
-    if (!pqrsSubject || !pqrsDescription) return;
-
-    const seq = state.nextPqrsSeq || 42;
-    const ticketId = `PQ-2026-${seq.toString().padStart(4, '0')}`;
-
-    const newTicket = {
-      id: ticketId,
-      ticketNumber: ticketId,
-      apartmentId: myApartment.id,
-      residentName: myApartment.ownerName,
-      category: pqrsCategory,
-      subject: pqrsSubject,
-      description: pqrsDescription,
-      status: 'Radicada',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      officialResponse: null,
-      history: [
-        {
-          previousStatus: 'Inicio',
-          newStatus: 'Radicada',
-          changedBy: `${myApartment.ownerName} (Residente)`,
-          changedAt: new Date().toISOString(),
-          comment: 'Radicación electrónica formal desde el portal del residente.'
-        }
-      ]
-    };
-
-    onAddPqrs(newTicket);
-    setPqrsSuccess(`¡PQRS radicada exitosamente con consecutivo oficial ${ticketId}!`);
-    setPqrsSubject('');
-    setPqrsDescription('');
+    setContactMsg(null);
+    try {
+      await onUpdateContact(currentUser.uid, {
+        displayName: contactName,
+        phone: contactPhone,
+      });
+      setContactMsg({ type: 'success', text: 'Datos de contacto actualizados en Firestore.' });
+    } catch (err) {
+      setContactMsg({ type: 'error', text: err?.message || 'Error al actualizar datos.' });
+    }
   };
+
+  const pendingPackagesCount = packages.filter((p) => p.status === 'Pendiente').length;
+  const nonResidentAuthorizedCount = authorizedPeople.filter((a) => a.relation !== 'residente' && a.isActive).length;
 
   return (
     <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px' }}>
-      {/* Resident Identity Header Card */}
+      {/* Resident Identity Header Card (Real Firestore Data) */}
       <div className="cds-tile" style={{ marginBottom: '24px', backgroundColor: '#ffffff', border: '1px solid #e0e0e0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -215,58 +183,51 @@ export default function ResidentPortal({
               fontWeight: 600,
               display: 'flex',
               flexDirection: 'column',
-              alignItems: 'center'
+              alignItems: 'center',
             }}>
-              <span>{myApartment.id}</span>
-              <span style={{ fontSize: '10px', color: '#8d8d8d' }}>{myApartment.towerName}</span>
+              <span>{currentUser.unitId}</span>
+              <span style={{ fontSize: '10px', color: '#78a9ff' }}>TORRE {currentUser.towerId || apartment?.towerId || '—'}</span>
             </div>
             <div>
               <div style={{ fontSize: '18px', fontWeight: 600, color: '#161616' }}>
-                {myApartment.ownerName}
+                {currentUser.displayName || currentUser.email}
               </div>
               <div style={{ fontSize: '12px', color: '#525252' }}>
-                Residente Titular // {myApartment.email} // Tel: {myApartment.phone}
+                Residente // <span className="font-mono">{currentUser.email}</span>
+                {currentUser.phone ? ` // Tel: ${currentUser.phone}` : ''}
               </div>
+              {apartment?.ownerName && (
+                <div style={{ fontSize: '11px', color: '#6f6f6f', marginTop: '2px' }}>
+                  Titular registrado en unidad: <strong>{apartment.ownerName}</strong>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Quick Apartment Context Switcher for Demonstration */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '11px', color: '#8d8d8d', textTransform: 'uppercase' }}>
-              Simular Apto:
-            </span>
-            <select
-              className="cds-select font-mono"
-              style={{ width: '150px', height: '36px', fontSize: '12px' }}
-              value={activeAptId}
-              onChange={(e) => setActiveAptId(e.target.value)}
-            >
-              <option value="T1-101">T1-101 (C. Rodríguez)</option>
-              <option value="T2-304">T2-304 (C. Morales)</option>
-              <option value="T3-502">T3-502 (F. Vargas)</option>
-            </select>
-          </div>
+          <span className="cds-tag cds-tag-blue">RN-B7: AISLAMIENTO POR UNIDAD</span>
         </div>
 
-        {/* Tab Navigation Menu */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #e0e0e0', marginTop: '20px' }}>
+        {/* Tab Navigation */}
+        <div style={{ display: 'flex', borderBottom: '1px solid #e0e0e0', marginTop: '20px', overflowX: 'auto' }}>
           {[
-            { id: 'packages', label: 'Mis Paquetes', icon: Package, badge: myPackages.filter(p => p.status === 'Pendiente').length },
-            { id: 'reservations', label: 'Zonas Comunes (Reservas)', icon: Calendar, badge: myReservations.length },
-            { id: 'authorized', label: 'Personas Autorizadas', icon: ShieldCheck, badge: myApartment.authorized.length },
-            { id: 'pqrs', label: 'Mis PQRS Radicadas', icon: FileText, badge: myPqrs.length }
-          ].map(tab => {
+            { id: 'packages', label: 'Mis Paquetes', icon: Package, badge: pendingPackagesCount },
+            { id: 'reservations', label: 'Zonas Comunes (Reservas)', icon: Calendar, badge: reservations.length },
+            { id: 'authorized', label: 'Personas Autorizadas', icon: ShieldCheck, badge: nonResidentAuthorizedCount },
+            { id: 'profile', label: 'Mi Perfil (Ley 1581)', icon: UserCheck, badge: 0 },
+            { id: 'pqrs', label: 'PQRS (Sprint 2)', icon: FileText, badge: 0 },
+          ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveTab(tab.id)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  padding: '12px 20px',
+                  padding: '12px 18px',
                   fontFamily: 'var(--cds-font-sans)',
                   fontSize: '13px',
                   fontWeight: isActive ? 600 : 500,
@@ -275,7 +236,7 @@ export default function ResidentPortal({
                   border: 'none',
                   borderBottom: isActive ? '3px solid #0f62fe' : '3px solid transparent',
                   cursor: 'pointer',
-                  marginBottom: '-1px'
+                  whiteSpace: 'nowrap',
                 }}
               >
                 <Icon size={16} />
@@ -291,52 +252,52 @@ export default function ResidentPortal({
         </div>
       </div>
 
-      {/* ==========================================================================
-          TAB 1: MIS PAQUETES (FEED PRIVADO RESIDENTE // RN-B7)
-          ========================================================================== */}
+      {/* TAB 1: MIS PAQUETES (CON-04, RN-B7) */}
       {activeTab === 'packages' && (
         <div>
-          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
             <div>
               <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>Paquetería en Portería</h2>
               <p style={{ fontSize: '13px', color: '#525252' }}>
-                Historial de encomiendas recibidas en portería bajo custodia oficial (RN-B7: privacidad por apartamento).
+                Consulta en tiempo real de encomiendas asignadas exclusivamente al apartamento {currentUser.unitId}.
               </p>
             </div>
             <span className="cds-tag cds-tag-blue">RN-B7: HABEAS DATA ACTIVO</span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
-            {myPackages.length === 0 ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+            {packages.length === 0 ? (
               <div className="cds-tile" style={{ gridColumn: '1/-1', textAlign: 'center', padding: '40px', color: '#8d8d8d' }}>
                 <Package size={32} style={{ margin: '0 auto 10px', display: 'block', opacity: 0.5 }} />
-                No tiene paquetes registrados en portería en este momento.
+                No hay paquetes registrados para la unidad {currentUser.unitId}.
               </div>
             ) : (
-              myPackages.map(pkg => {
+              packages.map((pkg) => {
                 const isPending = pkg.status === 'Pendiente';
-                const days = Math.floor((new Date() - new Date(pkg.receivedAt)) / (1000 * 60 * 60 * 24));
+                const days = Math.floor(getElapsedHours(pkg.receivedAt, nowMs) / 24);
                 const isOverdue = isPending && days >= 15;
 
                 return (
-                  <div 
-                    key={pkg.id} 
-                    className="cds-tile" 
-                    style={{ 
+                  <div
+                    key={pkg.id}
+                    className="cds-tile"
+                    style={{
                       backgroundColor: '#ffffff',
-                      borderLeft: isOverdue ? '4px solid #da1e28' : isPending ? '4px solid #0f62fe' : '4px solid #24a148' 
+                      borderLeft: isOverdue ? '4px solid #da1e28' : isPending ? '4px solid #0f62fe' : '4px solid #24a148',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                       <div>
-                        <span className="cds-tag cds-tag-dark font-mono">{pkg.id}</span>
+                        <span className="cds-tag cds-tag-dark font-mono">{pkg.id.slice(0, 10)}</span>
                         <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '6px' }}>{pkg.courier}</div>
-                        <div style={{ fontSize: '11px', color: '#525252', fontFamily: 'var(--cds-font-mono)' }}>Guía: {pkg.trackingNumber}</div>
+                        <div style={{ fontSize: '11px', color: '#525252', fontFamily: 'var(--cds-font-mono)' }}>
+                          Guía: {pkg.trackingNumber || 'Sin guía'}
+                        </div>
                       </div>
 
                       {isPending ? (
                         <span className={`cds-tag ${isOverdue ? 'cds-tag-red' : 'cds-tag-blue'}`}>
-                          {isOverdue ? 'BODEGAJE >15D (RN-B5)' : 'EN CUSTODIA'}
+                          {isOverdue ? 'BODEGAJE >15D (RN-B5)' : 'PENDIENTE POR RECLAMAR'}
                         </span>
                       ) : (
                         <span className="cds-tag cds-tag-green">ENTREGADO</span>
@@ -349,11 +310,10 @@ export default function ResidentPortal({
                     </div>
 
                     <div style={{ fontSize: '11px', color: '#8d8d8d', borderTop: '1px solid #e0e0e0', paddingTop: '8px' }}>
-                      <div>Recibido: {new Date(pkg.receivedAt).toLocaleString('es-CO')}</div>
-                      <div>Por: {pkg.receivedByPorteroName}</div>
-                      {!isPending && (
+                      <div>Recibido en portería: {formatDateTimeCO(pkg.receivedAt)}</div>
+                      {!isPending && pkg.deliveredToPerson && (
                         <div style={{ marginTop: '4px', color: '#0e6027', fontWeight: 500 }}>
-                          Retirado por: {pkg.deliveredToPerson} ({new Date(pkg.deliveredAt).toLocaleDateString('es-CO')})
+                          Retirado por: {pkg.deliveredToPerson} ({formatDateCO(pkg.deliveredAt)})
                         </div>
                       )}
                     </div>
@@ -365,20 +325,14 @@ export default function ResidentPortal({
         </div>
       )}
 
-      {/* ==========================================================================
-          TAB 2: ZONAS COMUNES (MOTOR DE RESERVAS CON VALIDACIÓN RN-B1, B2, B3)
-          ========================================================================== */}
+      {/* TAB 2: RESERVAS DE ZONAS COMUNES (CON-06: RN-B1, RN-B2, RN-B3) */}
       {activeTab === 'reservations' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '440px 1fr', gap: '24px', alignItems: 'start' }}>
-          
-          {/* Reservation Form */}
-          <div className="cds-tile" style={{ backgroundColor: '#ffffff', border: '2px solid #0f62fe' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px', alignItems: 'start' }}>
+          <div className="cds-tile" style={{ backgroundColor: '#ffffff', border: '2px solid #0f62fe', maxWidth: '480px', width: '100%' }}>
             <div style={{ borderBottom: '1px solid #e0e0e0', paddingBottom: '10px', marginBottom: '16px' }}>
-              <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#161616' }}>
-                Solicitar Zona Común
-              </h2>
+              <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#161616' }}>Solicitar Zona Común</h2>
               <div style={{ fontSize: '12px', color: '#525252' }}>
-                Validación estricta de antelación mínima de 48h (RN-B2) y 1 cupo mensual (RN-B3).
+                Validación atómica en Firestore: antelación 48h (RN-B2), 1 cupo mensual (RN-B3) y sin cruces (RN-B1).
               </div>
             </div>
 
@@ -392,7 +346,7 @@ export default function ResidentPortal({
                 marginBottom: '16px',
                 display: 'flex',
                 gap: '8px',
-                alignItems: 'flex-start'
+                alignItems: 'flex-start',
               }}>
                 <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
                 <div>{bookingError}</div>
@@ -409,7 +363,7 @@ export default function ResidentPortal({
                 marginBottom: '16px',
                 display: 'flex',
                 gap: '8px',
-                alignItems: 'center'
+                alignItems: 'center',
               }}>
                 <CheckCircle2 size={16} />
                 <div>{bookingSuccess}</div>
@@ -417,49 +371,37 @@ export default function ResidentPortal({
             )}
 
             <form onSubmit={handleBookingSubmit}>
-              {/* Common Area Selector */}
               <div style={{ marginBottom: '16px' }}>
                 <label className="cds-input-label">ZONA COMÚN A RESERVAR</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedArea('salon_social')}
-                    style={{
-                      padding: '12px',
-                      backgroundColor: selectedArea === 'salon_social' ? '#0f62fe' : '#f4f4f4',
-                      color: selectedArea === 'salon_social' ? '#ffffff' : '#161616',
-                      border: '1px solid',
-                      borderColor: selectedArea === 'salon_social' ? '#0f62fe' : '#e0e0e0',
-                      textAlign: 'left',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: '13px' }}>Salón Social</div>
-                    <div style={{ fontSize: '11px', opacity: 0.85 }}>Cap. 80 personas</div>
-                    <div style={{ fontSize: '11px', opacity: 0.85 }}>Depósito: $200.000</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedArea('bbq')}
-                    style={{
-                      padding: '12px',
-                      backgroundColor: selectedArea === 'bbq' ? '#0f62fe' : '#f4f4f4',
-                      color: selectedArea === 'bbq' ? '#ffffff' : '#161616',
-                      border: '1px solid',
-                      borderColor: selectedArea === 'bbq' ? '#0f62fe' : '#e0e0e0',
-                      textAlign: 'left',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: '13px' }}>Zona BBQ & Terraza</div>
-                    <div style={{ fontSize: '11px', opacity: 0.85 }}>Cap. 30 personas</div>
-                    <div style={{ fontSize: '11px', opacity: 0.85 }}>Depósito: $80.000</div>
-                  </button>
+                  {[
+                    { id: 'salon_social', title: 'Salón Social', subtitle: '08:00-14:00 / 15:00-22:00' },
+                    { id: 'bbq', title: 'Zona BBQ', subtitle: '10:00-16:00 / 17:00-22:00' },
+                  ].map((area) => (
+                    <button
+                      key={area.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedArea(area.id);
+                        if (bookingDate) setLoadingSlots(true);
+                      }}
+                      style={{
+                        padding: '12px',
+                        backgroundColor: selectedArea === area.id ? '#0f62fe' : '#f4f4f4',
+                        color: selectedArea === area.id ? '#ffffff' : '#161616',
+                        border: '1px solid',
+                        borderColor: selectedArea === area.id ? '#0f62fe' : '#e0e0e0',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{area.title}</div>
+                      <div style={{ fontSize: '11px', opacity: 0.85 }}>{area.subtitle}</div>
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Date Input with 48h limit */}
               <div style={{ marginBottom: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <label className="cds-input-label">FECHA DEL EVENTO</label>
@@ -472,102 +414,106 @@ export default function ResidentPortal({
                   className="cds-input font-mono"
                   min={minDateStr}
                   value={bookingDate}
-                  onChange={(e) => setBookingDate(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setBookingDate(val);
+                    if (!val) {
+                      setTakenSlots([]);
+                      setLoadingSlots(false);
+                    } else {
+                      setLoadingSlots(true);
+                    }
+                  }}
                   required
                 />
               </div>
 
-              {/* Official Time Slot Buttons according to reservationSlots.ts & RN-B1 */}
               <div style={{ marginBottom: '20px' }}>
-                <label className="cds-input-label">FRANJA HORARIA NORMATIVA (RN-B1)</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label className="cds-input-label">FRANJA HORARIA (RN-B1)</label>
+                  {loadingSlots && (
+                    <span style={{ fontSize: '10px', color: '#525252' }}>Consultando disponibilidad...</span>
+                  )}
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedSlot('AM')}
-                    style={{
-                      padding: '10px 12px',
-                      backgroundColor: selectedSlot === 'AM' ? '#161616' : '#ffffff',
-                      color: selectedSlot === 'AM' ? '#ffffff' : '#161616',
-                      border: '1px solid',
-                      borderColor: selectedSlot === 'AM' ? '#161616' : '#8d8d8d',
-                      textAlign: 'left',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: '12px' }}>Franja Diurna (AM)</div>
-                    <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', opacity: 0.85 }}>
-                      {selectedArea === 'salon_social' ? '08:00 - 14:00 (6 hrs)' : '10:00 - 16:00 (6 hrs)'}
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedSlot('PM')}
-                    style={{
-                      padding: '10px 12px',
-                      backgroundColor: selectedSlot === 'PM' ? '#161616' : '#ffffff',
-                      color: selectedSlot === 'PM' ? '#ffffff' : '#161616',
-                      border: '1px solid',
-                      borderColor: selectedSlot === 'PM' ? '#161616' : '#8d8d8d',
-                      textAlign: 'left',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: '12px' }}>Franja Nocturna (PM)</div>
-                    <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', opacity: 0.85 }}>
-                      {selectedArea === 'salon_social' ? '15:00 - 22:00 (7 hrs)' : '17:00 - 22:00 (5 hrs)'}
-                    </div>
-                  </button>
+                  {(['AM', 'PM']).map((slotKey) => {
+                    const [startH, endH] = SLOTS[selectedArea][slotKey];
+                    const isTaken = takenSlots.includes(slotKey);
+                    const isSelected = selectedSlot === slotKey;
+                    return (
+                      <button
+                        key={slotKey}
+                        type="button"
+                        disabled={isTaken}
+                        onClick={() => setSelectedSlot(slotKey)}
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: isTaken ? '#fff1f1' : isSelected ? '#161616' : '#ffffff',
+                          color: isTaken ? '#a2191f' : isSelected ? '#ffffff' : '#161616',
+                          border: '1px solid',
+                          borderColor: isTaken ? '#ffb3b8' : isSelected ? '#161616' : '#8d8d8d',
+                          textAlign: 'left',
+                          cursor: isTaken ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, fontSize: '12px' }}>
+                          Franja {slotKey} {isTaken ? '(OCUPADA)' : ''}
+                        </div>
+                        <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', opacity: 0.85 }}>
+                          {String(startH).padStart(2, '0')}:00 - {String(endH).padStart(2, '0')}:00
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <button type="submit" className="cds-btn cds-btn-primary" style={{ width: '100%' }}>
-                <span>RADICAR SOLICITUD DE RESERVA</span>
+              <button
+                type="submit"
+                className="cds-btn cds-btn-primary"
+                style={{ width: '100%' }}
+                disabled={submittingBooking || takenSlots.includes(selectedSlot)}
+              >
+                <span>{submittingBooking ? 'RADICANDO...' : 'RADICAR SOLICITUD DE RESERVA'}</span>
                 <Calendar size={16} />
               </button>
             </form>
           </div>
 
-          {/* Resident Bookings History Table */}
-          <div>
-            <div style={{ marginBottom: '12px' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#161616' }}>
-                Historial de Reservas del Apartamento {myApartment.id}
-              </h3>
-            </div>
-
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#161616', marginBottom: '12px' }}>
+              Historial de Reservas — Unidad {currentUser.unitId}
+            </h3>
             <div className="cds-table-container">
               <table className="cds-table">
                 <thead>
                   <tr>
-                    <th>Código</th>
+                    <th>ID</th>
                     <th>Zona Común</th>
                     <th>Fecha y Horario</th>
-                    <th>Depósito</th>
                     <th>Estado</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {myReservations.length === 0 ? (
+                  {reservations.length === 0 ? (
                     <tr>
-                      <td colSpan="5" style={{ textAlign: 'center', padding: '30px', color: '#8d8d8d' }}>
+                      <td colSpan="4" style={{ textAlign: 'center', padding: '30px', color: '#8d8d8d' }}>
                         No hay solicitudes de reserva registradas para este apartamento.
                       </td>
                     </tr>
                   ) : (
-                    myReservations.map(res => (
+                    reservations.map((res) => (
                       <tr key={res.id}>
-                        <td className="font-mono" style={{ fontWeight: 600 }}>{res.id}</td>
-                        <td>{res.commonAreaName}</td>
+                        <td className="font-mono" style={{ fontWeight: 600 }}>{res.id.slice(0, 10)}</td>
+                        <td>{AREA_LABELS[res.commonArea] || res.commonArea} ({res.slot})</td>
                         <td>
-                          <div>{new Date(res.startTime).toLocaleDateString('es-CO')}</div>
+                          <div>{res.date || formatDateCO(res.startTime)}</div>
                           <div style={{ fontSize: '11px', color: '#525252' }}>
-                            {new Date(res.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(res.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {formatTimeCO(res.startTime)} - {formatTimeCO(res.endTime)}
                           </div>
                         </td>
-                        <td className="font-mono">${res.depositAmount.toLocaleString('es-CO')}</td>
                         <td>
-                          {res.status === 'Pendiente' && <span className="cds-tag cds-tag-yellow">PENDIENTE APROBACIÓN</span>}
+                          {res.status === 'Pendiente' && <span className="cds-tag cds-tag-yellow">PENDIENTE</span>}
                           {res.status === 'Aprobada' && <span className="cds-tag cds-tag-green">APROBADA</span>}
                           {res.status === 'Rechazada' && (
                             <div>
@@ -590,28 +536,30 @@ export default function ResidentPortal({
         </div>
       )}
 
-      {/* ==========================================================================
-          TAB 3: PERSONAS AUTORIZADAS (LEY 1581 HABEAS DATA // RN-B4)
-          ========================================================================== */}
+      {/* TAB 3: PERSONAS AUTORIZADAS (CON-02, RN-B4, RN-B7) */}
       {activeTab === 'authorized' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '420px 1fr', gap: '24px', alignItems: 'start' }}>
-          
-          {/* Add Authorized Person Form */}
-          <div className="cds-tile" style={{ backgroundColor: '#ffffff', border: '1px solid #e0e0e0' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px', alignItems: 'start' }}>
+          <div className="cds-tile" style={{ backgroundColor: '#ffffff', border: '1px solid #e0e0e0', maxWidth: '460px', width: '100%' }}>
             <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>
               Registrar Persona Autorizada
             </h3>
             <p style={{ fontSize: '12px', color: '#525252', marginBottom: '16px' }}>
-              Solo las personas registradas aquí podrán retirar paquetes en portería sin el titular presente (RN-B4).
+              Solo los residentes habilitados por Administración y las personas autorizadas aquí podrán retirar paquetes en portería (RN-B4).
             </p>
 
-            <form onSubmit={handleAddAuthorized}>
+            {authFormError && (
+              <div style={{ backgroundColor: '#fff1f1', border: '1px solid #ffb3b8', color: '#a2191f', padding: '10px 12px', fontSize: '12px', marginBottom: '12px' }}>
+                {authFormError}
+              </div>
+            )}
+
+            <form onSubmit={handleAddAuthorizedSubmit}>
               <div style={{ marginBottom: '12px' }}>
                 <label className="cds-input-label">NOMBRE COMPLETO</label>
                 <input
                   type="text"
                   className="cds-input"
-                  placeholder="Ej. Juan Pérez"
+                  placeholder="Nombre de la persona autorizada"
                   value={newAuthName}
                   onChange={(e) => setNewAuthName(e.target.value)}
                   required
@@ -619,11 +567,11 @@ export default function ResidentPortal({
               </div>
 
               <div style={{ marginBottom: '12px' }}>
-                <label className="cds-input-label">N° DE DOCUMENTO DE IDENTIDAD</label>
+                <label className="cds-input-label">N° DE DOCUMENTO</label>
                 <input
                   type="text"
                   className="cds-input font-mono"
-                  placeholder="Ej. CC 1020304050"
+                  placeholder="Ej. 1020304050"
                   value={newAuthDoc}
                   onChange={(e) => setNewAuthDoc(e.target.value)}
                   required
@@ -651,68 +599,84 @@ export default function ResidentPortal({
                   <option value="Familiar">Familiar (Hijo/a, Pareja, Hermano/a)</option>
                   <option value="Personal de Servicio">Personal de Servicio Doméstico</option>
                   <option value="Arrendatario">Arrendatario / Huésped Autorizado</option>
-                  <option value="Conductor / Mensajero">Conductor / Asistente Particular</option>
+                  <option value="Asistente">Asistente / Conductor</option>
                 </select>
               </div>
 
-              <div style={{ fontSize: '11px', color: '#525252', backgroundColor: '#f4f4f4', padding: '8px 10px', marginBottom: '16px' }}>
-                <ShieldCheck size={14} style={{ verticalAlign: 'middle', marginRight: '4px', color: '#0f62fe' }} />
-                Cumplimiento Ley 1581 de 2012 (Habeas Data): El titular autoriza el tratamiento de estos datos exclusivamente para la recepción y control de correspondencia.
-              </div>
-
-              <button type="submit" className="cds-btn cds-btn-primary" style={{ width: '100%' }}>
-                <span>GUARDAR PERSONA AUTORIZADA</span>
+              <button type="submit" className="cds-btn cds-btn-primary" style={{ width: '100%' }} disabled={submittingAuth}>
+                <span>{submittingAuth ? 'GUARDANDO...' : 'GUARDAR PERSONA AUTORIZADA'}</span>
                 <UserPlus size={16} />
               </button>
             </form>
           </div>
 
-          {/* Authorized Persons List */}
-          <div>
+          <div style={{ minWidth: 0 }}>
             <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '12px' }}>
-              Personas Habilitadas para Recibir Paquetería ({myApartment.authorized.length})
+              Personas Habilitadas en Portería ({authorizedPeople.length})
             </h3>
-
             <div className="cds-table-container">
               <table className="cds-table">
                 <thead>
                   <tr>
                     <th>Nombre Completo</th>
                     <th>Documento</th>
-                    <th>Teléfono</th>
                     <th>Relación</th>
+                    <th>Estado</th>
                     <th>Acción</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {!myApartment.authorized || myApartment.authorized.length === 0 ? (
+                  {authorizedPeople.length === 0 ? (
                     <tr>
                       <td colSpan="5" style={{ textAlign: 'center', padding: '24px', color: '#8d8d8d' }}>
-                        No tiene personas autorizadas registradas para su apartamento. Use el formulario superior para habilitar un receptor.
+                        No hay personas habilitadas registradas aún para la unidad {currentUser.unitId}.
                       </td>
                     </tr>
                   ) : (
-                    myApartment.authorized.map(person => (
-                      <tr key={person.id}>
-                        <td style={{ fontWeight: 600 }}>{person.name}</td>
-                        <td className="font-mono">{person.doc}</td>
-                        <td className="font-mono">{person.phone}</td>
-                        <td>
-                          <span className="cds-tag cds-tag-blue">{person.relation}</span>
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="cds-btn cds-btn-ghost"
-                            style={{ padding: '4px 8px', height: '28px', color: '#da1e28' }}
-                            onClick={() => onRemoveAuthorized(myApartment.id, person.id)}
-                          >
-                            <Trash2 size={14} />
-                            <span>Revocar</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    authorizedPeople.map((person) => {
+                      const isResidentRecord = person.relation === 'residente';
+                      return (
+                        <tr key={person.id}>
+                          <td style={{ fontWeight: 600 }}>{person.fullName}</td>
+                          <td className="font-mono">{person.documentId}</td>
+                          <td>
+                            <span className={`cds-tag ${isResidentRecord ? 'cds-tag-dark' : 'cds-tag-blue'}`}>
+                              {person.relation}
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`cds-tag ${person.isActive ? 'cds-tag-green' : 'cds-tag-gray'}`}>
+                              {person.isActive ? 'ACTIVO' : 'INACTIVO'}
+                            </span>
+                          </td>
+                          <td>
+                            {isResidentRecord ? (
+                              <span style={{ fontSize: '11px', color: '#8d8d8d' }}>Gestionado por Admin</span>
+                            ) : (
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-ghost"
+                                  style={{ padding: '4px 8px', height: '28px', minHeight: '28px', fontSize: '12px' }}
+                                  onClick={() => onToggleAuthorized(currentUser.unitId, person.id, !person.isActive)}
+                                >
+                                  {person.isActive ? 'Desactivar' : 'Activar'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-ghost"
+                                  style={{ padding: '4px 8px', height: '28px', minHeight: '28px', color: '#da1e28', fontSize: '12px' }}
+                                  onClick={() => onRemoveAuthorized(currentUser.unitId, person.id)}
+                                >
+                                  <Trash2 size={14} />
+                                  <span>Eliminar</span>
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -721,145 +685,65 @@ export default function ResidentPortal({
         </div>
       )}
 
-      {/* ==========================================================================
-          TAB 4: PQRS RADICADAS (CONSECUTIVO ATÓMICO + HISTORIAL RN-B6)
-          ========================================================================== */}
-      {activeTab === 'pqrs' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '440px 1fr', gap: '24px', alignItems: 'start' }}>
-          
-          {/* Radicación PQRS Form */}
-          <div className="cds-tile" style={{ backgroundColor: '#ffffff', border: '1px solid #e0e0e0' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px' }}>
-              Radicar Nueva PQRS
-            </h3>
-            <p style={{ fontSize: '12px', color: '#525252', marginBottom: '16px' }}>
-              Genera consecutivo oficial irreversible con fecha y hora del servidor.
-            </p>
+      {/* TAB 4: MI PERFIL (SCRUM-53 / LEY 1581) */}
+      {activeTab === 'profile' && (
+        <div className="cds-tile" style={{ backgroundColor: '#ffffff', maxWidth: '520px' }}>
+          <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '6px' }}>
+            Mis Datos de Contacto (Ley 1581 de 2012)
+          </h3>
+          <p style={{ fontSize: '12px', color: '#525252', marginBottom: '16px' }}>
+            El residente puede actualizar únicamente su nombre y teléfono; el rol y la unidad asignada son protegidos por las reglas de Firestore.
+          </p>
 
-            {pqrsSuccess && (
-              <div style={{
-                backgroundColor: '#defbe6',
-                border: '1px solid #6fdc8c',
-                color: '#0e6027',
-                padding: '10px 12px',
-                fontSize: '12px',
-                marginBottom: '16px',
-                display: 'flex',
-                gap: '8px',
-                alignItems: 'center'
-              }}>
-                <CheckCircle2 size={16} />
-                <div>{pqrsSuccess}</div>
-              </div>
-            )}
-
-            <form onSubmit={handlePqrsSubmit}>
-              <div style={{ marginBottom: '12px' }}>
-                <label className="cds-input-label">TIPO DE SOLICITUD</label>
-                <select
-                  className="cds-select"
-                  value={pqrsCategory}
-                  onChange={(e) => setPqrsCategory(e.target.value)}
-                >
-                  <option value="Peticion">Petición (Información, certificados, copias)</option>
-                  <option value="Queja">Queja (Conducta de vecinos, ruidos, vigilantes)</option>
-                  <option value="Reclamo">Reclamo (Fallas en zonas comunes, cobros, aseo)</option>
-                  <option value="Sugerencia">Sugerencia (Mejoras comunitarias o ambientales)</option>
-                </select>
-              </div>
-
-              <div style={{ marginBottom: '12px' }}>
-                <label className="cds-input-label">ASUNTO</label>
-                <input
-                  type="text"
-                  className="cds-input"
-                  placeholder="Resumen concreto de la solicitud"
-                  value={pqrsSubject}
-                  onChange={(e) => setPqrsSubject(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div style={{ marginBottom: '16px' }}>
-                <label className="cds-input-label">DESCRIPCIÓN DETALLADA</label>
-                <textarea
-                  className="cds-input"
-                  style={{ height: '110px', paddingTop: '8px', resize: 'vertical' }}
-                  placeholder="Escriba aquí los hechos, fechas y peticiones claras..."
-                  value={pqrsDescription}
-                  onChange={(e) => setPqrsDescription(e.target.value)}
-                  required
-                ></textarea>
-              </div>
-
-              <button type="submit" className="cds-btn cds-btn-primary" style={{ width: '100%' }}>
-                <span>RADICAR SOLICITUD FORMAL</span>
-                <FileText size={16} />
-              </button>
-            </form>
-          </div>
-
-          {/* Radicados List */}
-          <div>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '12px' }}>
-              Mis PQRS Radicadas ({myPqrs.length})
-            </h3>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {myPqrs.length === 0 ? (
-                <div className="cds-tile" style={{ textAlign: 'center', padding: '30px', color: '#8d8d8d' }}>
-                  No tiene solicitudes radicadas en este momento.
-                </div>
-              ) : (
-                myPqrs.map(ticket => (
-                  <div key={ticket.id} className="cds-tile" style={{ backgroundColor: '#ffffff' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                      <div>
-                        <span className="cds-tag cds-tag-dark font-mono">{ticket.ticketNumber}</span>
-                        <span className="cds-tag cds-tag-blue" style={{ marginLeft: '6px' }}>{ticket.category}</span>
-                        <h4 style={{ fontSize: '16px', fontWeight: 600, marginTop: '6px' }}>{ticket.subject}</h4>
-                      </div>
-
-                      {ticket.status === 'Radicada' && <span className="cds-tag cds-tag-yellow">RADICADA</span>}
-                      {ticket.status === 'En gestión' && <span className="cds-tag cds-tag-blue">EN GESTIÓN</span>}
-                      {ticket.status === 'Resuelta' && <span className="cds-tag cds-tag-green">RESUELTA</span>}
-                    </div>
-
-                    <p style={{ fontSize: '13px', color: '#525252', marginBottom: '12px' }}>
-                      {ticket.description}
-                    </p>
-
-                    {/* Official Response Box (RN-B6) */}
-                    {ticket.officialResponse && (
-                      <div style={{
-                        backgroundColor: '#defbe6',
-                        borderLeft: '4px solid #24a148',
-                        padding: '12px 14px',
-                        marginBottom: '12px'
-                      }}>
-                        <div style={{ fontSize: '11px', fontWeight: 600, color: '#0e6027', marginBottom: '4px' }}>
-                          RESPUESTA OFICIAL DE ADMINISTRACIÓN (RN-B6):
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#161616' }}>
-                          {ticket.officialResponse}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Timeline of States */}
-                    <div style={{ borderTop: '1px solid #e0e0e0', paddingTop: '8px', fontSize: '11px', color: '#8d8d8d' }}>
-                      <strong>Línea de tiempo:</strong>
-                      {ticket.history.map((h, i) => (
-                        <div key={i} style={{ marginTop: '2px' }}>
-                          • {new Date(h.changedAt).toLocaleString('es-CO')}: Estado '{h.newStatus}' por {h.changedBy}.
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
+          {contactMsg && (
+            <div style={{
+              backgroundColor: contactMsg.type === 'error' ? '#fff1f1' : '#defbe6',
+              border: `1px solid ${contactMsg.type === 'error' ? '#ffb3b8' : '#6fdc8c'}`,
+              color: contactMsg.type === 'error' ? '#a2191f' : '#0e6027',
+              padding: '10px 12px',
+              fontSize: '12px',
+              marginBottom: '14px',
+            }}>
+              {contactMsg.text}
             </div>
-          </div>
+          )}
+
+          <form onSubmit={handleSaveContact}>
+            <div style={{ marginBottom: '12px' }}>
+              <label className="cds-input-label">NOMBRE COMPLETO</label>
+              <input
+                type="text"
+                className="cds-input"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                required
+              />
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label className="cds-input-label">TELÉFONO</label>
+              <input
+                type="tel"
+                className="cds-input font-mono"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+              />
+            </div>
+            <button type="submit" className="cds-btn cds-btn-primary">
+              <span>Actualizar Datos</span>
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* TAB 5: PQRS (Programado Sprint 2: CON-08) */}
+      {activeTab === 'pqrs' && (
+        <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderLeft: '4px solid #0f62fe', padding: '24px' }}>
+          <h3 style={{ fontSize: '17px', fontWeight: 600, color: '#161616', marginBottom: '6px' }}>
+            Módulo de PQRS con Radicado Consecutivo (CON-08 / CON-09)
+          </h3>
+          <p style={{ fontSize: '13px', color: '#525252' }}>
+            Este módulo corresponde al <strong>Sprint 2</strong> del tablero SCRUM y se conectará con radicación atómica en Firestore e historial inmutable (`RN-B6`) al iniciar dicho sprint.
+          </p>
         </div>
       )}
     </div>

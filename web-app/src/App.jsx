@@ -1,385 +1,274 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import { auth, db } from './config/firebase';
+import {
+  subscribeToOwnProfile,
+  subscribeToUsers,
+  assignResidentToApartment,
+  setStaffRole,
+  setUserActive,
+  updateOwnContact,
+} from './services/userService';
+import {
+  subscribeToTowers,
+  createTower,
+  updateTower,
+  deleteTower,
+  subscribeToAllApartments,
+  subscribeToApartment,
+  createApartment,
+  updateApartmentOwner,
+  deleteApartment,
+  subscribeToAuthorized,
+  addAuthorizedPerson,
+  setAuthorizedActive,
+  removeAuthorizedPerson,
+} from './services/censusService';
+import {
+  registerIncomingPackage,
+  deliverPackageTransaction,
+  subscribeToPendingPackages,
+  subscribeToAllPackages,
+  subscribeToAllApartmentPackages,
+} from './services/packageService';
+import {
+  requestReservation,
+  subscribeToApartmentReservations,
+  subscribeToAllReservations,
+} from './services/reservationService';
+import AuthScreen from './components/auth/AuthScreen';
 import CarbonMasthead from './components/layout/CarbonMasthead';
 import GuardTerminal from './components/guard/GuardTerminal';
 import ResidentPortal from './components/resident/ResidentPortal';
 import AdminConsole from './components/admin/AdminConsole';
-import LoginModal, { PRESET_USERS } from './components/auth/LoginModal';
-import { loadCondominiumState, saveCondominiumState, resetCondominiumState } from './data/condominiumData';
-import { 
-  probeBackendStatus,
-  bridgeRegisterPackage,
-  bridgeDeliverPackage,
-  bridgeRequestReservation,
-  bridgeAddAuthorized,
-  bridgeRemoveAuthorized,
-  bridgeSubscribePendingPackages,
-  seedCondominiumToFirestore,
-  BusinessRuleError
-} from './services/backendBridge';
-import { CheckCircle2, AlertTriangle, X } from 'lucide-react';
 
 export default function App() {
-  const [condoState, setCondoState] = useState(() => loadCondominiumState());
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('altos_active_user');
-      if (saved) return JSON.parse(saved);
-    } catch (_) {}
-    return PRESET_USERS[0]; // Default to Vigilante Néstor Beltrán
-  });
-  const [currentRole, setCurrentRole] = useState(() => {
-    try {
-      const saved = localStorage.getItem('altos_active_user');
-      if (saved) return JSON.parse(saved).role || 'portero';
-    } catch (_) {}
-    return 'portero';
-  });
-  const [backendStatus, setBackendStatus] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Live Firestore collections (strictly scoped by authenticated role)
+  const [towers, setTowers] = useState([]);
+  const [apartments, setApartments] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [residentApartment, setResidentApartment] = useState(null);
+  const [residentAuthorized, setResidentAuthorized] = useState([]);
+  const [packages, setPackages] = useState([]);
+  const [reservations, setReservations] = useState([]);
+
   const [toastNotification, setToastNotification] = useState(null);
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
-  // Sync active user to local storage
-  const handleLoginSuccess = (user) => {
-    setCurrentUser(user);
-    setCurrentRole(user.role);
-    try {
-      localStorage.setItem('altos_active_user', JSON.stringify(user));
-    } catch (_) {}
-    showToast('success', `Identidad verificada: ${user.name} (${user.roleLabel || user.role}).`);
-  };
-
-  const handleRoleChange = (newRole) => {
-    setCurrentRole(newRole);
-    // Sync persona if switching roles
-    const matched = PRESET_USERS.find(p => p.role === newRole);
-    if (matched) {
-      setCurrentUser(matched);
-      try {
-        localStorage.setItem('altos_active_user', JSON.stringify(matched));
-      } catch (_) {}
-    }
-  };
-
-  // Probe Firestore & Auth Status on mount
-  useEffect(() => {
-    let isMounted = true;
-    probeBackendStatus().then(status => {
-      if (isMounted) setBackendStatus(status);
-    });
-    return () => { isMounted = false; };
-  }, []);
-
-  // Sync state to local storage on mutation
-  useEffect(() => {
-    saveCondominiumState(condoState);
-  }, [condoState]);
-
-  // Connect real-time Firestore listener for packages
-  useEffect(() => {
-    try {
-      const unsubscribe = bridgeSubscribePendingPackages(
-        (firestorePkgs) => {
-          if (!firestorePkgs || firestorePkgs.length === 0) {
-            setCondoState(prev => ({
-              ...prev,
-              packages: prev.packages.filter(p => !p.id?.startsWith('PKG-2026-'))
-            }));
-            return;
-          }
-          setCondoState(prev => {
-            // Merge firestore packages with local packages
-            const newMapped = firestorePkgs.map(fp => ({
-              id: fp.id,
-              trackingNumber: fp.trackingNumber || `GUIA-${fp.id.slice(-6)}`,
-              courier: fp.courier,
-              towerId: fp.towerId,
-              apartmentId: fp.apartmentId,
-              recipientName: fp.recipientName,
-              status: fp.status,
-              notes: fp.notes || '',
-              receivedByPorteroId: fp.receivedByPorteroId,
-              receivedByPorteroName: 'Vigilante Néstor Beltrán (Portería)',
-              receivedAt: fp.receivedAt ? new Date(fp.receivedAt.seconds * 1000).toISOString() : new Date().toISOString(),
-              deliveredAt: fp.deliveredAt ? new Date(fp.deliveredAt.seconds * 1000).toISOString() : null,
-              deliveredByPorteroId: fp.deliveredByPorteroId || null,
-              deliveredToPerson: fp.deliveredToPerson || null,
-              receiverDocumentId: fp.deliveredToDocument || null
-            }));
-
-            // Filter out any legacy mock packages
-            const merged = [...newMapped];
-            prev.packages.forEach(lp => {
-              if (!merged.some(m => m.id === lp.id) && !lp.id?.startsWith('PKG-2026-')) {
-                merged.push(lp);
-              }
-            });
-            return { ...prev, packages: merged };
-          });
-        },
-        (_err) => {
-          // Si las reglas deniegan consulta por falta de sesión auth activa, se mantiene el estado local
-        }
-      );
-      return () => unsubscribe();
-    } catch (_e) {
-      // Ignorar si no está autenticado en producción
-    }
-  }, []);
-
-  const showToast = (type, message) => {
+  const showToast = useCallback((type, message) => {
     setToastNotification({ type, message });
     setTimeout(() => setToastNotification(null), 6000);
-  };
+  }, []);
 
-  // Handler: Add package in Portería (<10s)
-  const handleAddPackage = async (newPkg) => {
-    try {
-      // Intentar registro en la función real de Firestore (packageService.registerIncomingPackage)
-      let firestoreId = null;
-      try {
-        firestoreId = await bridgeRegisterPackage({
-          apartmentId: newPkg.apartmentId,
-          courier: newPkg.courier,
-          recipientName: newPkg.recipientName,
-          trackingNumber: newPkg.trackingNumber,
-          notes: newPkg.notes
-        }, newPkg.receivedByPorteroId);
-      } catch (err) {
-        if (err instanceof BusinessRuleError) {
-          showToast('error', `Error de Regla: ${err.message}`);
-          return;
-        }
-        // Si falla por Auth, registrar localmente con ID determinista
+  // 1. Firebase Auth state listener
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setAuthUser(user);
+      setAuthReady(true);
+      if (!user) {
+        setUserProfile(null);
+        setProfileLoading(false);
+        setTowers([]);
+        setApartments([]);
+        setUsers([]);
+        setResidentApartment(null);
+        setResidentAuthorized([]);
+        setPackages([]);
+        setReservations([]);
+      } else {
+        setProfileLoading(true);
       }
+    });
+    return () => unsub();
+  }, []);
 
-      const finalPkg = firestoreId ? { ...newPkg, id: firestoreId } : newPkg;
-      setCondoState(prev => ({
-        ...prev,
-        packages: [finalPkg, ...prev.packages]
-      }));
-      showToast('success', `Paquete ${finalPkg.id} registrado para Apto ${finalPkg.apartmentId} (RN-B7).`);
-    } catch (e) {
-      showToast('error', `Error en registro: ${e.message}`);
-    }
-  };
-
-  // Handler: Deliver package (RN-B4 Transaction)
-  const handleDeliverPackage = async (pkgId, deliveredToPerson, receiverDoc, porteroName) => {
-    try {
-      // 1. Ejecutar transacción real de entrega con validación atómica de personas autorizadas (RN-B4)
-      try {
-        await bridgeDeliverPackage(pkgId, receiverDoc, 'guard_guardia1', 'Entrega en ventanilla');
-      } catch (err) {
-        if (err instanceof BusinessRuleError) {
-          showToast('error', `REGLA RN-B4 VIOLADA: ${err.message}`);
-          return;
-        }
+  // 2. Real-time Firestore profile listener for authenticated user
+  useEffect(() => {
+    if (!authUser?.uid) return undefined;
+    const unsub = subscribeToOwnProfile(
+      db,
+      authUser.uid,
+      (profile) => {
+        setUserProfile(profile);
+        setProfileLoading(false);
+      },
+      (err) => {
+        setProfileLoading(false);
+        showToast('error', `Error al leer perfil de usuario: ${err.message}`);
       }
+    );
+    return () => unsub();
+  }, [authUser?.uid, showToast]);
 
-      setCondoState(prev => ({
-        ...prev,
-        packages: prev.packages.map(p => {
-          if (p.id !== pkgId) return p;
-          return {
-            ...p,
-            status: 'Entregado',
-            deliveredAt: new Date().toISOString(),
-            deliveredByPorteroId: 'guard_guardia1',
-            deliveredByPorteroName: porteroName,
-            deliveredToPerson,
-            receiverDocumentId: receiverDoc
-          };
-        })
-      }));
-      showToast('success', `Paquete ${pkgId} entregado exitosamente a ${deliveredToPerson} (RN-B4).`);
-    } catch (e) {
-      showToast('error', `Error en entrega: ${e.message}`);
+  // 3. Role-scoped Firestore subscriptions (strictly compliant with firestore.rules)
+  useEffect(() => {
+    if (!userProfile || userProfile.isActive !== true) return undefined;
+    const unsubscribers = [];
+    const onSubError = (scope) => (err) => {
+      console.error(`Firestore subscription error (${scope}):`, err);
+    };
+
+    if (userProfile.role === 'portero') {
+      unsubscribers.push(subscribeToTowers(db, setTowers, onSubError('towers')));
+      unsubscribers.push(subscribeToAllApartments(db, setApartments, onSubError('apartments')));
+      unsubscribers.push(subscribeToPendingPackages(db, setPackages, onSubError('packages')));
+    } else if (userProfile.role === 'administradora') {
+      unsubscribers.push(subscribeToTowers(db, setTowers, onSubError('towers')));
+      unsubscribers.push(subscribeToAllApartments(db, setApartments, onSubError('apartments')));
+      unsubscribers.push(subscribeToUsers(db, setUsers, onSubError('users')));
+      unsubscribers.push(subscribeToAllPackages(db, setPackages, onSubError('packages')));
+      unsubscribers.push(subscribeToAllReservations(db, setReservations, onSubError('reservations')));
+    } else if (userProfile.role === 'residente' && userProfile.unitId) {
+      const unitId = userProfile.unitId;
+      unsubscribers.push(subscribeToApartment(db, unitId, setResidentApartment, onSubError('apartment')));
+      unsubscribers.push(subscribeToAuthorized(db, unitId, setResidentAuthorized, onSubError('authorized')));
+      unsubscribers.push(subscribeToAllApartmentPackages(db, unitId, setPackages, onSubError('packages')));
+      unsubscribers.push(subscribeToApartmentReservations(db, unitId, setReservations, onSubError('reservations')));
     }
-  };
 
-  // Handler: Add common area booking (RN-B1, RN-B2, RN-B3)
-  const handleAddReservation = async (newRes) => {
-    try {
-      // Intentar procesar con reservationService.requestReservation
-      try {
-        const slotId = newRes.startTime && newRes.startTime.includes('10:') || newRes.startTime.includes('08:') ? 'AM' : 'PM';
-        const dateStr = newRes.startTime ? newRes.startTime.split('T')[0] : new Date().toISOString().split('T')[0];
-        
-        await bridgeRequestReservation({
-          residentId: newRes.residentName || 'residente-titular',
-          apartmentId: newRes.apartmentId,
-          commonArea: newRes.commonArea,
-          date: dateStr,
-          slot: slotId
-        });
-      } catch (err) {
-        if (err instanceof BusinessRuleError) {
-          showToast('error', `REGLA DE NEGOCIO: ${err.message}`);
-          return;
+    return () => {
+      unsubscribers.forEach((unsub) => {
+        try {
+          unsub();
+        } catch (err) {
+          console.warn('Unsubscribe warning:', err);
         }
-      }
+      });
+    };
+  }, [userProfile]);
 
-      setCondoState(prev => ({
-        ...prev,
-        reservations: [newRes, ...prev.reservations]
-      }));
-      showToast('success', `Solicitud ${newRes.id} radicada en estado 'Pendiente' con validación RN-B1/RN-B2/RN-B3.`);
-    } catch (e) {
-      showToast('error', `Error en reserva: ${e.message}`);
-    }
+  const handleLogout = async () => {
+    await signOut(auth);
   };
 
-  // Handler: Resolve reservation (Approve/Reject with reason)
-  const handleResolveReservation = (resId, newStatus, reason, adminName) => {
-    setCondoState(prev => ({
-      ...prev,
-      reservations: prev.reservations.map(r => {
-        if (r.id !== resId) return r;
-        return {
-          ...r,
-          status: newStatus,
-          rejectionReason: reason || null,
-          resolvedBy: adminName,
-          resolvedAt: new Date().toISOString()
-        };
-      })
-    }));
-    showToast(newStatus === 'Aprobada' ? 'success' : 'info', `Reserva ${resId} ${newStatus.toLowerCase()} por Administración.`);
+  // Loading Firebase Auth initialization
+  if (!authReady) {
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: '#161616', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontFamily: 'var(--cds-font-mono)', fontSize: '13px', color: '#78a9ff' }}>
+          INICIALIZANDO SESIÓN SEGURA...
+        </div>
+      </div>
+    );
+  }
+
+  // Auth Gate: unauthenticated, disabled, missing profile, or unassigned resident
+  const isAuthorizedActiveSession =
+    Boolean(authUser) &&
+    !profileLoading &&
+    Boolean(userProfile) &&
+    userProfile.isActive === true &&
+    (userProfile.role !== 'residente' || Boolean(userProfile.unitId));
+
+  if (!isAuthorizedActiveSession) {
+    return (
+      <AuthScreen
+        authUser={authUser}
+        userProfile={userProfile}
+        profileLoading={profileLoading}
+      />
+    );
+  }
+
+  // Real Firestore action handlers
+  const handleAddPackage = async (input) => {
+    const pkgId = await registerIncomingPackage(db, userProfile.uid, input);
+    showToast('success', `Paquete ${pkgId.slice(0, 10)} registrado en Firestore para ${input.apartmentId}.`);
+    return pkgId;
   };
 
-  // Handler: Add PQRS
-  const handleAddPqrs = (newPqrs) => {
-    setCondoState(prev => ({
-      ...prev,
-      nextPqrsSeq: (prev.nextPqrsSeq || 42) + 1,
-      pqrs: [newPqrs, ...prev.pqrs]
-    }));
-    showToast('success', `PQRS ${newPqrs.id} radicada exitosamente (RN-B6).`);
+  const handleDeliverPackage = async (packageId, receiverDocumentId, notes) => {
+    await deliverPackageTransaction(db, userProfile.uid, packageId, receiverDocumentId, notes);
+    showToast('success', 'Entrega registrada atómicamente en Cloud Firestore (RN-B4).');
   };
 
-  // Handler: Transition PQRS status with official response (RN-B6)
-  const handleTransitionPqrs = (ticketId, newStatus, officialResponse, changedBy) => {
-    setCondoState(prev => ({
-      ...prev,
-      pqrs: prev.pqrs.map(t => {
-        if (t.id !== ticketId) return t;
-        const now = new Date().toISOString();
-        const historyEntry = {
-          previousStatus: t.status,
-          newStatus: newStatus,
-          changedBy: changedBy,
-          changedAt: now,
-          comment: newStatus === 'Resuelta' 
-            ? `Resuelta con respuesta oficial: ${officialResponse}` 
-            : `Transición a estado '${newStatus}'`
-        };
-
-        return {
-          ...t,
-          status: newStatus,
-          updatedAt: now,
-          officialResponse: officialResponse || t.officialResponse,
-          history: [...t.history, historyEntry]
-        };
-      })
-    }));
-    showToast('success', `PQRS ${ticketId} actualizada a '${newStatus}' con trazabilidad inmutable.`);
+  const handleRequestReservation = async (req) => {
+    const id = await requestReservation(db, req);
+    showToast('success', `Solicitud de reserva ${id.slice(0, 10)} radicada en Cloud Firestore.`);
+    return id;
   };
 
-  // Handler: Add authorized person for an apartment (RN-B4, RN-B7)
   const handleAddAuthorized = async (apartmentId, person) => {
-    try {
-      try {
-        await bridgeAddAuthorized(apartmentId, {
-          fullName: person.name,
-          documentId: person.doc.replace('CC ', '').trim(),
-          phone: person.phone,
-          relation: person.relation
-        });
-      } catch (_e) {
-        // En caso de que no haya sesión auth en Firestore, mantener en estado local
-      }
-
-      setCondoState(prev => ({
-        ...prev,
-        apartments: prev.apartments.map(apt => {
-          if (apt.id !== apartmentId) return apt;
-          return {
-            ...apt,
-            authorized: [...(apt.authorized || []), person]
-          };
-        })
-      }));
-      showToast('success', `Persona autorizada (${person.name}) registrada para ${apartmentId} (RN-B4).`);
-    } catch (e) {
-      showToast('error', `Error al registrar autorizado: ${e.message}`);
-    }
+    await addAuthorizedPerson(db, apartmentId, person);
+    showToast('success', `Persona autorizada (${person.fullName}) registrada en Firestore.`);
   };
 
-  // Handler: Remove authorized person
+  const handleToggleAuthorized = async (apartmentId, authId, isActive) => {
+    await setAuthorizedActive(db, apartmentId, authId, isActive);
+    showToast('info', isActive ? 'Autorización reactivada.' : 'Autorización desactivada.');
+  };
+
   const handleRemoveAuthorized = async (apartmentId, authId) => {
-    try {
-      try {
-        await bridgeRemoveAuthorized(apartmentId, authId);
-      } catch (_e) {
-        // En caso de fallo auth
-      }
-
-      setCondoState(prev => ({
-        ...prev,
-        apartments: prev.apartments.map(apt => {
-          if (apt.id !== apartmentId) return apt;
-          return {
-            ...apt,
-            authorized: (apt.authorized || []).filter(a => a.id !== authId)
-          };
-        })
-      }));
-      showToast('info', `Autorización revocada exitosamente.`);
-    } catch (e) {
-      showToast('error', `Error al revocar autorización: ${e.message}`);
-    }
+    await removeAuthorizedPerson(db, apartmentId, authId);
+    showToast('info', 'Persona autorizada eliminada.');
   };
 
-  // Handler: Seed Census in Cloud Firestore
-  const handleSeedCensus = async () => {
-    try {
-      showToast('info', 'Iniciando siembra de Torres y Apartamentos en Cloud Firestore...');
-      const result = await seedCondominiumToFirestore();
-      showToast('success', `Censo sincronizado con Cloud Firestore: ${result.towersCreated} torres y ${result.apartmentsCreated} apartamentos verificados.`);
-    } catch (e) {
-      showToast('error', `Error en siembra de censo: ${e.message}`);
-    }
+  const handleUpdateContact = async (uid, data) => {
+    await updateOwnContact(db, uid, data);
+    showToast('success', 'Perfil actualizado.');
   };
 
-  // Handler: Reset / Purge all mock and local test data
-  const handleResetData = () => {
-    const clean = resetCondominiumState();
-    setCondoState(clean);
-    showToast('info', '✔ Todos los datos de prueba han sido eliminados. El sistema se encuentra limpio.');
+  const handleCreateTower = async (tower) => {
+    await createTower(db, tower);
+    showToast('success', `Torre ${tower.id.toUpperCase()} creada en Cloud Firestore.`);
+  };
+
+  const handleUpdateTower = async (towerId, updates) => {
+    await updateTower(db, towerId, updates);
+    showToast('success', `Torre ${towerId} actualizada.`);
+  };
+
+  const handleDeleteTower = async (towerId) => {
+    await deleteTower(db, towerId);
+    showToast('info', `Torre ${towerId} eliminada.`);
+  };
+
+  const handleCreateApartment = async (input) => {
+    const aptId = await createApartment(db, input);
+    showToast('success', `Unidad ${aptId} creada en Cloud Firestore.`);
+  };
+
+  const handleUpdateApartmentOwner = async (apartmentId, ownerName) => {
+    await updateApartmentOwner(db, apartmentId, ownerName);
+    showToast('success', `Titular de ${apartmentId} actualizado.`);
+  };
+
+  const handleDeleteApartment = async (apartmentId) => {
+    await deleteApartment(db, apartmentId);
+    showToast('info', `Unidad ${apartmentId} eliminada.`);
+  };
+
+  const handleAssignResident = async (input) => {
+    await assignResidentToApartment(db, input);
+    showToast('success', `Residente asignado a la unidad ${input.apartmentId} y habilitado para RN-B4.`);
+  };
+
+  const handleSetStaffRole = async (userId, role) => {
+    await setStaffRole(db, userId, role);
+    showToast('success', `Rol actualizado a '${role}'.`);
+  };
+
+  const handleToggleUserActive = async (userId, isActive) => {
+    await setUserActive(db, userId, isActive);
+    showToast('info', isActive ? 'Cuenta reactivada.' : 'Cuenta desactivada (RF-02).');
   };
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* IBM Carbon Masthead */}
       <CarbonMasthead
-        currentRole={currentRole}
-        onRoleChange={handleRoleChange}
-        state={condoState}
-        backendStatus={backendStatus}
-        currentUser={currentUser}
-        onOpenLogin={() => setIsLoginModalOpen(true)}
-        onLogout={() => setIsLoginModalOpen(true)}
+        userProfile={userProfile}
+        towersCount={towers.length}
+        apartmentsCount={apartments.length}
+        packages={packages}
+        reservations={reservations}
+        onLogout={handleLogout}
       />
 
-      {/* Authentication & Role Protection Modal (SCRUM-7, SCRUM-8, SCRUM-53) */}
-      <LoginModal
-        isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
-        onLoginSuccess={handleLoginSuccess}
-      />
-
-      {/* Floating IBM Carbon Toast Notification */}
       {toastNotification && (
         <div style={{
           position: 'fixed',
@@ -395,12 +284,12 @@ export default function App() {
           boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
           fontFamily: 'var(--cds-font-sans)',
           fontSize: '13px',
-          maxWidth: '450px'
+          maxWidth: '450px',
         }}>
           {toastNotification.type === 'error' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
           <div style={{ flex: 1 }}>{toastNotification.message}</div>
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={() => setToastNotification(null)}
             style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', display: 'flex' }}
           >
@@ -409,39 +298,55 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Terminal View based on Active Role */}
       <main style={{ flex: 1, backgroundColor: 'var(--cds-ui-background)' }}>
-        {currentRole === 'portero' && (
+        {userProfile.role === 'portero' && (
           <GuardTerminal
-            state={condoState}
+            currentUser={userProfile}
+            towers={towers}
+            apartments={apartments}
+            packages={packages}
             onAddPackage={handleAddPackage}
             onDeliverPackage={handleDeliverPackage}
           />
         )}
 
-        {currentRole === 'residente' && (
+        {userProfile.role === 'residente' && (
           <ResidentPortal
-            state={condoState}
-            currentUser={currentUser}
-            onAddReservation={handleAddReservation}
-            onAddPqrs={handleAddPqrs}
+            currentUser={userProfile}
+            apartment={residentApartment}
+            authorizedPeople={residentAuthorized}
+            packages={packages}
+            reservations={reservations}
+            onRequestReservation={handleRequestReservation}
             onAddAuthorized={handleAddAuthorized}
+            onToggleAuthorized={handleToggleAuthorized}
             onRemoveAuthorized={handleRemoveAuthorized}
+            onUpdateContact={handleUpdateContact}
           />
         )}
 
-        {currentRole === 'admin' && (
+        {userProfile.role === 'administradora' && (
           <AdminConsole
-            state={condoState}
-            onResolveReservation={handleResolveReservation}
-            onTransitionPqrs={handleTransitionPqrs}
-            onImportCensusBatch={handleSeedCensus}
-            onResetData={handleResetData}
+            currentUser={userProfile}
+            towers={towers}
+            apartments={apartments}
+            users={users}
+            packages={packages}
+            reservations={reservations}
+            onCreateTower={handleCreateTower}
+            onUpdateTower={handleUpdateTower}
+            onDeleteTower={handleDeleteTower}
+            onCreateApartment={handleCreateApartment}
+            onUpdateApartmentOwner={handleUpdateApartmentOwner}
+            onDeleteApartment={handleDeleteApartment}
+            onAssignResident={handleAssignResident}
+            onSetStaffRole={handleSetStaffRole}
+            onToggleUserActive={handleToggleUserActive}
+            onNotify={showToast}
           />
         )}
       </main>
 
-      {/* IBM Carbon Technical Enterprise Footer */}
       <footer style={{
         backgroundColor: '#161616',
         color: '#8d8d8d',
@@ -453,18 +358,15 @@ export default function App() {
         alignItems: 'center',
         flexWrap: 'wrap',
         gap: '12px',
-        fontFamily: 'var(--cds-font-sans)'
+        fontFamily: 'var(--cds-font-sans)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <strong style={{ color: '#ffffff' }}>Altos del Parque // P.H.</strong>
-          <span>NIT 900.542.118-2</span>
-          <span>Carrera 45 # 128B - 30</span>
-          <span>Bogotá D.C., Colombia</span>
+          <span>Mi Conjunto en Línea</span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px', fontFamily: 'var(--cds-font-mono)', fontSize: '11px' }}>
-          <span>CARBON DESIGN SPEC v11</span>
-          <span>FIRESTORE MODULAR SERVICES: ACTIVE</span>
+          <span>FIREBASE AUTH + FIRESTORE SPARK</span>
           <span style={{ color: '#0f62fe' }}>LEY 1581 / RN-B1..RN-B7</span>
         </div>
       </footer>

@@ -5,14 +5,19 @@
 import {
   arrayRemove,
   arrayUnion,
+  collection,
   deleteField,
   doc,
   getDoc,
+  onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
   writeBatch,
   type Firestore,
+  type Unsubscribe,
 } from 'firebase/firestore'
 import { BusinessRuleError, requireNonEmpty } from './errors'
 
@@ -36,7 +41,7 @@ export interface UserProfile {
  */
 export async function registerOwnProfile(
   db: Firestore,
-  user: { uid: string; email: string | null; displayName?: string | null },
+  user: { uid: string; email: string | null; displayName?: string | null; phone?: string | null },
 ): Promise<void> {
   const ref = doc(db, 'users', user.uid)
   if ((await getDoc(ref)).exists()) return
@@ -44,6 +49,7 @@ export async function registerOwnProfile(
     uid: user.uid,
     email: user.email ?? '',
     displayName: user.displayName ?? '',
+    phone: user.phone?.trim() ?? '',
     role: 'residente',
     isActive: true,
     createdAt: serverTimestamp(),
@@ -53,6 +59,40 @@ export async function registerOwnProfile(
 export async function getUserProfile(db: Firestore, uid: string): Promise<UserProfile | null> {
   const snap = await getDoc(doc(db, 'users', uid))
   return snap.exists() ? (snap.data() as UserProfile) : null
+}
+
+export function subscribeToOwnProfile(
+  db: Firestore,
+  uid: string,
+  onChange: (profile: UserProfile | null) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(doc(db, 'users', uid), (snap) => {
+    onChange(snap.exists() ? (snap.data() as UserProfile) : null)
+  }, onError)
+}
+
+export function subscribeToUsers(
+  db: Firestore,
+  onChange: (users: UserProfile[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  const q = query(collection(db, 'users'), orderBy('email', 'asc'))
+  return onSnapshot(q, (snap) => {
+    onChange(snap.docs.map((d) => d.data() as UserProfile))
+  }, onError)
+}
+
+export async function updateOwnContact(
+  db: Firestore,
+  uid: string,
+  input: { displayName: string; phone: string },
+): Promise<void> {
+  const displayName = requireNonEmpty(input.displayName, 'Nombre completo')
+  await updateDoc(doc(db, 'users', uid), {
+    displayName,
+    phone: input.phone.trim(),
+  })
 }
 
 /**

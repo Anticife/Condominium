@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "condominium-f6236"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }
