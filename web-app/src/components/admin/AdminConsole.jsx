@@ -14,6 +14,8 @@ import {
   UserCog,
   ShieldCheck,
   Edit3,
+  CheckCircle2,
+  XCircle,
   X,
 } from 'lucide-react';
 import BoardReportModal from './BoardReportModal';
@@ -40,11 +42,19 @@ export default function AdminConsole({
   onAssignResident,
   onSetStaffRole,
   onToggleUserActive,
+  onApproveReservation,
+  onRejectReservation,
   onNotify,
 }) {
   const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'census' | 'users' | 'reservations'
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+
+  // Reservations management state (CON-07)
+  const [resStatusFilter, setResStatusFilter] = useState('ALL');
+  const [resActionId, setResActionId] = useState(null);
+  const [rejectingRes, setRejectingRes] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState('');
 
   // Tower Form State
   const [towerIdInput, setTowerIdInput] = useState('');
@@ -1000,64 +1010,228 @@ export default function AdminConsole({
         </div>
       )}
 
-      {/* TAB 4: RESERVAS (Vista en vivo desde Firestore; resolución CON-07 en Sprint 2) */}
-      {adminTab === 'reservations' && (
-        <div>
-          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>
-                Solicitudes de Reserva en Cloud Firestore ({reservations.length})
-              </h2>
-              <p style={{ fontSize: '13px', color: '#525252' }}>
-                Solicitudes radicadas bajo RN-B1, RN-B2 y RN-B3. El flujo de aprobación/rechazo con motivo (`CON-07`) se habilitará en Sprint 2.
-              </p>
-            </div>
-            <span className="cds-tag cds-tag-blue">SPRINT 2: CON-07</span>
-          </div>
+      {/* TAB 4: RESERVAS DE ESPACIOS COMUNES (CON-07: Aprobación RN-B1 y Rechazo con motivo RN-B3) */}
+      {adminTab === 'reservations' && (() => {
+        const pendingCount = reservations.filter((r) => r.status === 'Pendiente').length;
+        const approvedCount = reservations.filter((r) => r.status === 'Aprobada').length;
+        const rejectedCount = reservations.filter((r) => r.status === 'Rechazada').length;
+        const filteredReservations = resStatusFilter === 'ALL'
+          ? reservations
+          : reservations.filter((r) => r.status === resStatusFilter);
 
-          <div className="cds-table-container">
-            <table className="cds-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Unidad</th>
-                  <th>Zona Común</th>
-                  <th>Fecha y Franja</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reservations.length === 0 ? (
+        const handleApproveClick = async (resId) => {
+          setResActionId(resId);
+          try {
+            await onApproveReservation(resId);
+          } catch (err) {
+            onNotify('error', err?.message || 'No se pudo aprobar la reserva.');
+          } finally {
+            setResActionId(null);
+          }
+        };
+
+        const handleConfirmReject = async (e) => {
+          e.preventDefault();
+          if (!rejectingRes) return;
+          if (rejectionReason.trim().length < 5) {
+            onNotify('error', 'El motivo de rechazo debe tener al menos 5 caracteres.');
+            return;
+          }
+          setResActionId(rejectingRes.id);
+          try {
+            await onRejectReservation(rejectingRes.id, rejectionReason.trim());
+            setRejectingRes(null);
+            setRejectionReason('');
+          } catch (err) {
+            onNotify('error', err?.message || 'No se pudo rechazar la reserva.');
+          } finally {
+            setResActionId(null);
+          }
+        };
+
+        return (
+          <div>
+            <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>
+                  Reservas de Espacios Comunes ({reservations.length})
+                </h2>
+                <p style={{ fontSize: '13px', color: '#525252' }}>
+                  Aprueba solicitudes (bloquea la franja atómicamente bajo RN-B1) o recházalas con motivo obligatorio liberando el cupo mensual (RN-B3).
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', border: '1px solid #8d8d8d' }}>
+                {[
+                  { id: 'ALL', label: `Todas (${reservations.length})` },
+                  { id: 'Pendiente', label: `Pendientes (${pendingCount})` },
+                  { id: 'Aprobada', label: `Aprobadas (${approvedCount})` },
+                  { id: 'Rechazada', label: `Rechazadas (${rejectedCount})` },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setResStatusFilter(f.id)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '12px',
+                      fontWeight: resStatusFilter === f.id ? 600 : 400,
+                      backgroundColor: resStatusFilter === f.id ? '#161616' : '#ffffff',
+                      color: resStatusFilter === f.id ? '#ffffff' : '#393939',
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* KPI Strip */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+              <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderLeft: '4px solid #f1c21b' }}>
+                <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', color: '#525252' }}>PENDIENTES POR RESOLVER</div>
+                <div style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>{pendingCount}</div>
+              </div>
+              <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderLeft: '4px solid #24a148' }}>
+                <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', color: '#525252' }}>APROBADAS (FRANJA BLOQUEADA)</div>
+                <div style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>{approvedCount}</div>
+              </div>
+              <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderLeft: '4px solid #da1e28' }}>
+                <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', color: '#525252' }}>RECHAZADAS (CUPO LIBERADO)</div>
+                <div style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>{rejectedCount}</div>
+              </div>
+            </div>
+
+            <div className="cds-table-container">
+              <table className="cds-table">
+                <thead>
                   <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', padding: '36px', color: '#8d8d8d' }}>
-                      No hay solicitudes de reserva registradas en Firestore.
-                    </td>
+                    <th>ID</th>
+                    <th>Unidad</th>
+                    <th>Espacio Común</th>
+                    <th>Fecha y Franja</th>
+                    <th>Estado</th>
+                    <th>Gestión</th>
                   </tr>
-                ) : (
-                  reservations.map((res) => (
-                    <tr key={res.id}>
-                      <td className="font-mono" style={{ fontWeight: 600 }}>{res.id.slice(0, 10)}</td>
-                      <td className="font-mono"><strong>{res.apartmentId}</strong></td>
-                      <td>{AREA_LABELS[res.commonArea] || res.commonArea} ({res.slot})</td>
-                      <td>
-                        <div>{res.date || formatDateCO(res.startTime)}</div>
-                        <div style={{ fontSize: '11px', color: '#525252' }}>
-                          {formatTimeCO(res.startTime)} - {formatTimeCO(res.endTime)}
-                        </div>
-                      </td>
-                      <td>
-                        {res.status === 'Pendiente' && <span className="cds-tag cds-tag-yellow">PENDIENTE</span>}
-                        {res.status === 'Aprobada' && <span className="cds-tag cds-tag-green">APROBADA</span>}
-                        {res.status === 'Rechazada' && <span className="cds-tag cds-tag-red">RECHAZADA</span>}
+                </thead>
+                <tbody>
+                  {filteredReservations.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#8d8d8d' }}>
+                        No hay solicitudes de reserva para el filtro seleccionado.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredReservations.map((res) => {
+                      const busy = resActionId === res.id;
+                      return (
+                        <tr key={res.id}>
+                          <td className="font-mono" style={{ fontWeight: 600 }}>{res.id.slice(0, 10)}</td>
+                          <td className="font-mono"><strong>{res.apartmentId}</strong></td>
+                          <td>{AREA_LABELS[res.commonArea] || res.commonArea} ({res.slot})</td>
+                          <td>
+                            <div>{res.date || formatDateCO(res.startTime)}</div>
+                            <div style={{ fontSize: '11px', color: '#525252' }}>
+                              {formatTimeCO(res.startTime)} - {formatTimeCO(res.endTime)}
+                            </div>
+                          </td>
+                          <td>
+                            {res.status === 'Pendiente' && <span className="cds-tag cds-tag-yellow">PENDIENTE</span>}
+                            {res.status === 'Aprobada' && <span className="cds-tag cds-tag-green">APROBADA</span>}
+                            {res.status === 'Rechazada' && <span className="cds-tag cds-tag-red">RECHAZADA</span>}
+                            {res.rejectionReason && (
+                              <div style={{ fontSize: '11px', color: '#a2191f', marginTop: '4px', maxWidth: '240px' }}>
+                                Motivo: {res.rejectionReason}
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            {res.status === 'Pendiente' ? (
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-primary"
+                                  style={{ height: '30px', minHeight: '30px', padding: '0 12px', fontSize: '12px', backgroundColor: '#198038' }}
+                                  disabled={busy}
+                                  onClick={() => handleApproveClick(res.id)}
+                                >
+                                  <CheckCircle2 size={14} />
+                                  <span>{busy ? 'Procesando...' : 'Aprobar'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cds-btn cds-btn-danger"
+                                  style={{ height: '30px', minHeight: '30px', padding: '0 12px', fontSize: '12px' }}
+                                  disabled={busy}
+                                  onClick={() => {
+                                    setRejectingRes(res);
+                                    setRejectionReason('');
+                                  }}
+                                >
+                                  <XCircle size={14} />
+                                  <span>Rechazar</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: '#6f6f6f', fontFamily: 'var(--cds-font-mono)' }}>
+                                Resuelta {res.resolvedAt ? formatDateCO(res.resolvedAt) : ''}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Modal: Rechazar Reserva con Motivo Obligatorio */}
+            {rejectingRes && (
+              <div className="cds-modal-overlay">
+                <div className="cds-modal-content">
+                  <div style={{ backgroundColor: '#161616', color: '#ffffff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: '11px', color: '#ff8389', fontFamily: 'var(--cds-font-mono)' }}>RECHAZO DE RESERVA // CON-07 &amp; RN-B3</div>
+                      <div style={{ fontSize: '16px', fontWeight: 600 }}>
+                        Rechazar {AREA_LABELS[rejectingRes.commonArea] || rejectingRes.commonArea} — {rejectingRes.apartmentId}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setRejectingRes(null)} style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer' }}>
+                      <X size={20} />
+                    </button>
+                  </div>
+                  <form onSubmit={handleConfirmReject}>
+                    <div style={{ padding: '20px' }}>
+                      <p style={{ fontSize: '13px', color: '#525252', marginBottom: '12px' }}>
+                        Al rechazar esta solicitud del <strong>{rejectingRes.date} ({rejectingRes.slot})</strong>, se liberará automáticamente el cupo mensual del apartamento {rejectingRes.apartmentId}.
+                      </p>
+                      <label className="cds-input-label">MOTIVO DEL RECHAZO (OBLIGATORIO, MÍN. 5 CARACTERES)</label>
+                      <textarea
+                        className="cds-input"
+                        rows={3}
+                        style={{ height: 'auto', padding: '10px 12px', resize: 'vertical' }}
+                        placeholder="Ej. Mantenimiento programado del salón social en esa fecha."
+                        value={rejectionReason}
+                        onChange={(e) => setRejectionReason(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div style={{ backgroundColor: '#f4f4f4', borderTop: '1px solid #e0e0e0', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                      <button type="button" className="cds-btn cds-btn-secondary" onClick={() => setRejectingRes(null)}>Cancelar</button>
+                      <button type="submit" className="cds-btn cds-btn-danger" disabled={resActionId === rejectingRes.id}>
+                        {resActionId === rejectingRes.id ? 'Rechazando...' : 'Confirmar Rechazo'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Modal: Asignar Unidad a Residente */}
       {assigningUser && (

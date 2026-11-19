@@ -37,6 +37,8 @@ import {
 } from './services/packageService';
 import {
   requestReservation,
+  approveReservation,
+  rejectReservation,
   subscribeToApartmentReservations,
   subscribeToAllReservations,
 } from './services/reservationService';
@@ -237,6 +239,16 @@ export default function App() {
     return id;
   };
 
+  const handleApproveReservation = async (reservationId) => {
+    await approveReservation(db, condoId, userProfile.uid, reservationId);
+    showToast('success', 'Reserva aprobada y franja bloqueada atómicamente (RN-B1).');
+  };
+
+  const handleRejectReservation = async (reservationId, reason) => {
+    await rejectReservation(db, condoId, userProfile.uid, reservationId, reason);
+    showToast('info', 'Reserva rechazada y cupo mensual del apartamento liberado (RN-B3).');
+  };
+
   const handleAddAuthorized = async (apartmentId, person) => {
     await addAuthorizedPerson(db, condoId, apartmentId, person);
     showToast('success', `Persona autorizada (${person.fullName}) registrada en Firestore.`);
@@ -391,6 +403,8 @@ export default function App() {
             onAssignResident={handleAssignResident}
             onSetStaffRole={handleSetStaffRole}
             onToggleUserActive={handleToggleUserActive}
+            onApproveReservation={handleApproveReservation}
+            onRejectReservation={handleRejectReservation}
             onNotify={showToast}
           />
         )}
