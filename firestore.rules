@@ -253,7 +253,7 @@ service cloud.firestore {
         && existsAfter(quotaPath(request.resource.data.apartmentId, request.resource.data.date))
         && getAfter(quotaPath(request.resource.data.apartmentId, request.resource.data.date)).data.reservationId == reservationId;
 
-      // Resolución por la administradora (CON-07). Aprobar exige crear en el
+      // Resolución por la administradora (CON-07, SCRUM-28). Aprobar exige crear en el
       // mismo batch el bloqueo de la franja; como un documento no puede
       // crearse dos veces, nunca habrá dos reservas aprobadas en la misma
       // zona, fecha y franja (RN-B1), aunque se aprueben a la vez.
@@ -261,7 +261,7 @@ service cloud.firestore {
         && resource.data.status == 'Pendiente'
         && (request.resource.data.status in ['Aprobada', 'Rechazada'])
         && changesOnly(['status', 'rejectionReason', 'resolvedAt', 'resolvedBy'])
-        && (request.resource.data.status != 'Rechazada' || (request.resource.data.rejectionReason is string && request.resource.data.rejectionReason.size() >= 5))
+        && (request.resource.data.status != 'Rechazada' || (request.resource.data.rejectionReason is string && request.resource.data.rejectionReason.trim().size() >= 5))
         && (request.resource.data.status != 'Aprobada'
             || (existsAfter(slotLockPath(resource.data))
                 && getAfter(slotLockPath(resource.data)).data.reservationId == reservationId))
@@ -302,42 +302,84 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // CONTADORES Y RADICACIÓN (counters/pqrs) — Sprint 2
+    // CONTADORES Y RADICACIÓN (counters/pqrs) — SCRUM-31
     // ==========================================
     match /counters/pqrs {
-      allow read: if isAuthenticated();
-      // Solo permite incremento de exactamente +1
-      allow update: if isAuthenticated() && request.resource.data.sequence == resource.data.sequence + 1;
+      allow read: if hasRole('residente') || hasRole('administradora');
+      // Inicialización segura en 1 si el documento contador aún no existe.
+      allow create: if (hasRole('residente') || hasRole('administradora'))
+        && request.resource.data.keys().hasOnly(['year', 'sequence'])
+        && request.resource.data.year is int
+        && request.resource.data.sequence == 1;
+      // Solo permite incremento exacto de +1 dentro del mismo año (o reinicio a 1 al avanzar de año).
+      allow update: if (hasRole('residente') || hasRole('administradora'))
+        && request.resource.data.keys().hasOnly(['year', 'sequence'])
+        && request.resource.data.year is int
+        && request.resource.data.sequence is int
+        && ((request.resource.data.year == resource.data.year
+             && request.resource.data.sequence == resource.data.sequence + 1)
+            || (request.resource.data.year > resource.data.year
+                && request.resource.data.sequence == 1));
+      allow delete: if false;
     }
 
     // ==========================================
-    // PQRS (pqrs/{pqrsId}) — Sprint 2
+    // PQRS (pqrs/{pqrsId}) — SCRUM-31, SCRUM-35
     // RN-B6 (Respuesta oficial e historial inmutable)
     // ==========================================
     match /pqrs/{pqrsId} {
-      allow read: if hasRole('administradora') || (hasRole('residente') && resource.data.apartmentId == myUnitId());
+      // RN-B7: administradora ve todas; residente solo las de su apartamento.
+      allow read: if hasRole('administradora')
+        || (hasRole('residente') && resource.data.apartmentId == myUnitId());
 
       allow create: if hasRole('residente')
-        && request.resource.data.status == 'Radicada'
-        && request.resource.data.createdAt == request.time
+        && request.resource.data.keys().hasOnly(['ticketNumber', 'apartmentId', 'residentId', 'category', 'subject', 'description', 'status', 'createdAt'])
+        && request.resource.data.ticketNumber is string
+        && request.resource.data.ticketNumber.matches('^PQ-[0-9]{4}-[0-9]{4}$')
+        && myUnitId() != null
+        && request.resource.data.apartmentId == myUnitId()
         && request.resource.data.residentId == request.auth.uid
-        && request.resource.data.apartmentId == myUnitId();
+        && request.resource.data.category in ['Peticion', 'Queja', 'Reclamo', 'Sugerencia']
+        && isNonEmptyString(request.resource.data.subject)
+        && isNonEmptyString(request.resource.data.description)
+        && request.resource.data.status == 'Radicada'
+        && request.resource.data.createdAt == request.time;
 
       allow update: if hasRole('administradora')
+        && changesOnly(['status', 'officialResponse', 'updatedAt', 'resolvedAt', 'resolvedBy'])
         && ((request.resource.data.status == 'En gestión' && resource.data.status == 'Radicada')
             || (request.resource.data.status == 'Resuelta'
+                && resource.data.status in ['Radicada', 'En gestión']
                 && request.resource.data.officialResponse is string
-                && request.resource.data.officialResponse.size() >= 10))
+                && request.resource.data.officialResponse.trim().size() >= 10
+                && request.resource.data.resolvedBy == request.auth.uid
+                && request.resource.data.resolvedAt == request.time))
         && request.resource.data.updatedAt == request.time;
 
       allow delete: if false;
 
-      // Subcolección de auditoría de estados
+      // Subcolección de auditoría de estados: inmutabilidad estricta (RN-B6).
       match /history/{historyId} {
-        allow read: if hasRole('administradora') || (hasRole('residente') && get(/databases/$(database)/documents/pqrs/$(pqrsId)).data.apartmentId == myUnitId());
-        allow create: if hasRole('administradora') && request.resource.data.changedAt == request.time;
+        allow read: if hasRole('administradora')
+          || (hasRole('residente')
+              && exists(/databases/$(database)/documents/pqrs/$(pqrsId))
+              && get(/databases/$(database)/documents/pqrs/$(pqrsId)).data.apartmentId == myUnitId());
+        allow create: if hasRole('administradora')
+          && request.resource.data.keys().hasOnly(['previousStatus', 'newStatus', 'changedBy', 'changedAt', 'comment'])
+          && request.resource.data.previousStatus in ['Radicada', 'En gestión']
+          && request.resource.data.newStatus in ['En gestión', 'Resuelta']
+          && request.resource.data.changedBy == request.auth.uid
+          && request.resource.data.changedAt == request.time
+          && request.resource.data.comment is string;
         allow update, delete: if false;
       }
+    }
+
+    // ==========================================
+    // CIERRE POR DEFECTO (SCRUM-46)
+    // ==========================================
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
