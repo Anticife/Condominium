@@ -92,6 +92,21 @@ describe.skipIf(!hasEmulator)('apartments_authorized (SCRUM-10)', () => {
     await assertSucceeds(deleteTower(admin, CONDO_A, 'T2'))
   })
 
+  it('no permite superar la capacidad declarada de una torre ni reducirla por debajo de los registrados', async () => {
+    const admin = dbAs(env, UIDS.admin)
+    await assertSucceeds(createTower(admin, CONDO_A, { id: 'T3', name: 'Torre Pequeña', totalApartments: 2 }))
+    await assertSucceeds(createApartment(admin, CONDO_A, { towerId: 'T3', number: '101', ownerName: 'Uno' }))
+    await assertSucceeds(createApartment(admin, CONDO_A, { towerId: 'T3', number: '102', ownerName: 'Dos' }))
+    await expect(
+      createApartment(admin, CONDO_A, { towerId: 'T3', number: '103', ownerName: 'Excedente' }),
+    ).rejects.toThrow(/capacidad declarada/)
+    await expect(
+      updateTower(admin, CONDO_A, 'T3', { name: 'Torre Pequeña', totalApartments: 1 }),
+    ).rejects.toThrow(/No se puede reducir la capacidad/)
+    await assertSucceeds(updateTower(admin, CONDO_A, 'T3', { name: 'Torre Pequeña', totalApartments: 3 }))
+    await assertSucceeds(createApartment(admin, CONDO_A, { towerId: 'T3', number: '103', ownerName: 'Ahora sí' }))
+  })
+
   it('el portero lista solo autorizados activos de una unidad (RN-B4)', async () => {
     const list = await listActiveAuthorized(dbAs(env, UIDS.portero), CONDO_A, 'T1-101')
     expect(list.map((p) => p.documentId).sort()).toEqual(['1001', '2002'])

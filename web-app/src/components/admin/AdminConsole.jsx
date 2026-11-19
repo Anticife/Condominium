@@ -683,69 +683,95 @@ export default function AdminConsole({
             </div>
 
             {/* Create Apartment */}
-            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #24a148' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Home size={16} color="#24a148" />
-                Registrar Apartamento / Unidad
-              </h3>
-              <p style={{ fontSize: '12px', color: '#525252', marginBottom: '14px' }}>
-                El ID determinista (`{'{torre}-{número}'}`) impide unidades duplicadas en la misma torre (CON-02).
-              </p>
+            {(() => {
+              const selectedTower = towers.find((t) => t.id === effectiveAptTowerId);
+              const selectedTowerCount = apartments.filter((a) => a.towerId === effectiveAptTowerId).length;
+              const isSelectedTowerFull = Boolean(
+                selectedTower && selectedTowerCount >= Number(selectedTower.totalApartments || 0),
+              );
+              return (
+                <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #24a148' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Home size={16} color="#24a148" />
+                    Registrar Apartamento / Unidad
+                  </h3>
+                  <p style={{ fontSize: '12px', color: '#525252', marginBottom: '14px' }}>
+                    El ID determinista (`{'{torre}-{número}'}`) impide unidades duplicadas (CON-02) y respeta la capacidad declarada de cada torre.
+                  </p>
 
-              <form onSubmit={handleApartmentSubmit}>
-                <div className="cds-form-row-2" style={{ marginBottom: '10px' }}>
-                  <div>
-                    <label className="cds-input-label">TORRE</label>
-                    <select
-                      className="cds-select"
-                      value={effectiveAptTowerId}
-                      onChange={(e) => setAptTowerId(e.target.value)}
-                      required
+                  <form onSubmit={handleApartmentSubmit}>
+                    <div className="cds-form-row-2" style={{ marginBottom: '10px' }}>
+                      <div>
+                        <label className="cds-input-label">TORRE</label>
+                        <select
+                          className="cds-select"
+                          value={effectiveAptTowerId}
+                          onChange={(e) => setAptTowerId(e.target.value)}
+                          required
+                        >
+                          {towers.length === 0 ? (
+                            <option value="">Cree primero una torre</option>
+                          ) : (
+                            towers.map((t) => {
+                              const tCount = apartments.filter((a) => a.towerId === t.id).length;
+                              return (
+                                <option key={t.id} value={t.id}>
+                                  {t.id} — {t.name} ({tCount}/{t.totalApartments})
+                                </option>
+                              );
+                            })
+                          )}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="cds-input-label">NÚMERO (EJ. 101, 204)</label>
+                        <input
+                          type="text"
+                          className="cds-input font-mono"
+                          placeholder="101"
+                          value={aptNumberInput}
+                          onChange={(e) => setAptNumberInput(e.target.value)}
+                          disabled={isSelectedTowerFull}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: '12px' }}>
+                      <label className="cds-input-label">PROPIETARIO / TITULAR</label>
+                      <input
+                        type="text"
+                        className="cds-input"
+                        placeholder="Nombre completo del propietario o titular"
+                        value={aptOwnerInput}
+                        onChange={(e) => setAptOwnerInput(e.target.value)}
+                        disabled={isSelectedTowerFull}
+                      />
+                    </div>
+                    {isSelectedTowerFull && selectedTower && (
+                      <div style={{
+                        marginBottom: '12px',
+                        padding: '10px 12px',
+                        backgroundColor: '#fff1f1',
+                        borderLeft: '3px solid #da1e28',
+                        fontSize: '12px',
+                        color: '#750e13',
+                      }}>
+                        La torre <strong>{selectedTower.id}</strong> ya alcanzó su capacidad declarada ({selectedTowerCount}/{selectedTower.totalApartments} unidades). Edite la capacidad de la torre para registrar más apartamentos o casas.
+                      </div>
+                    )}
+                    <button
+                      type="submit"
+                      className="cds-btn cds-btn-primary"
+                      style={{ width: '100%' }}
+                      disabled={towers.length === 0 || isSelectedTowerFull}
                     >
-                      {towers.length === 0 ? (
-                        <option value="">Cree primero una torre</option>
-                      ) : (
-                        towers.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.id} — {t.name}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="cds-input-label">NÚMERO (EJ. 101, 204)</label>
-                    <input
-                      type="text"
-                      className="cds-input font-mono"
-                      placeholder="101"
-                      value={aptNumberInput}
-                      onChange={(e) => setAptNumberInput(e.target.value)}
-                      required
-                    />
-                  </div>
+                      <span>{isSelectedTowerFull ? 'Capacidad de torre completa' : 'Registrar Unidad'}</span>
+                      <Plus size={16} />
+                    </button>
+                  </form>
                 </div>
-                <div style={{ marginBottom: '12px' }}>
-                  <label className="cds-input-label">PROPIETARIO / TITULAR</label>
-                  <input
-                    type="text"
-                    className="cds-input"
-                    placeholder="Nombre completo del propietario o titular"
-                    value={aptOwnerInput}
-                    onChange={(e) => setAptOwnerInput(e.target.value)}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="cds-btn cds-btn-primary"
-                  style={{ width: '100%' }}
-                  disabled={towers.length === 0}
-                >
-                  <span>Registrar Unidad</span>
-                  <Plus size={16} />
-                </button>
-              </form>
-            </div>
+              );
+            })()}
           </div>
 
           {/* Existing Towers List */}
@@ -793,7 +819,7 @@ export default function AdminConsole({
                             {isEditing ? (
                               <input
                                 type="number"
-                                min="1"
+                                min={Math.max(1, count)}
                                 className="cds-input font-mono"
                                 style={{ height: '32px', width: '90px' }}
                                 value={editingTower.totalApartments}
@@ -803,7 +829,11 @@ export default function AdminConsole({
                               t.totalApartments
                             )}
                           </td>
-                          <td className="font-mono">{count}</td>
+                          <td className="font-mono">
+                            <span style={{ color: count >= Number(t.totalApartments || 0) ? '#da1e28' : '#161616', fontWeight: count >= Number(t.totalApartments || 0) ? 700 : 400 }}>
+                              {count} / {t.totalApartments}
+                            </span>
+                          </td>
                           <td>
                             {isEditing ? (
                               <div style={{ display: 'flex', gap: '8px' }}>

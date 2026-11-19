@@ -86,6 +86,28 @@ describe.skipIf(!hasEmulator)('importCensusBatch (SCRUM-43 emulator)', () => {
     expect(aptSnap.size).toBe(6)
   })
 
+  it('respeta la capacidad declarada de torres existentes durante la carga masiva', async () => {
+    const adminDb = dbAs(env, UIDS.admin)
+    // T1 ya tiene 2 apartamentos en seed; creamos T4 con capacidad máxima 1
+    const { createTower } = await import('../../src/services/censusService')
+    await createTower(adminDb, CONDO_A, { id: 'T4', name: 'Bloque Casas', totalApartments: 1 })
+
+    const csv = [
+      'Torre,Apartamento,NombreResidente,Email,Telefono,EsPropietario',
+      'T4,C1,Casa Uno,c1@test.co,3001111111,Si',
+      'T4,C2,Casa Dos Excedente,c2@test.co,3002222222,Si',
+    ].join('\n')
+
+    const report = await importCensusFromCsv(adminDb, CONDO_A, csv)
+    expect(report.apartmentsCreated).toBe(1)
+    expect(report.skippedDuplicates).toBe(0)
+    expect(report.errors).toHaveLength(1)
+    expect(report.errors[0].reason).toMatch(/capacidad declarada/)
+
+    const t4Snap = await getDoc(doc(adminDb, `${cPath}/towers/T4`))
+    expect(t4Snap.get('totalApartments')).toBe(1)
+  })
+
   it('bloquea con permission-denied a residente, portero, administradora de otro conjunto y anónimo', async () => {
     const { validRows } = parseCensusCsv(
       'Torre,Apartamento,NombreResidente,Email,Telefono,EsPropietario\nT9,901,Intruso,i@test.co,300,Si',

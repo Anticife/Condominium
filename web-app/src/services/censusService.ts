@@ -79,6 +79,15 @@ export async function updateTower(
   if (!Number.isInteger(updates.totalApartments) || updates.totalApartments <= 0) {
     throw new BusinessRuleError('invalid-argument', 'El total de apartamentos debe ser un entero positivo.')
   }
+  const existingInTower = await getDocs(
+    query(collection(db, 'condominiums', condoId, 'apartments'), where('towerId', '==', id)),
+  )
+  if (updates.totalApartments < existingInTower.size) {
+    throw new BusinessRuleError(
+      'failed-precondition',
+      `No se puede reducir la capacidad de ${id} a ${updates.totalApartments}: ya existen ${existingInTower.size} unidades registradas.`,
+    )
+  }
   await updateDoc(doc(db, 'condominiums', condoId, 'towers', id), { id, name, totalApartments: updates.totalApartments })
 }
 
@@ -116,12 +125,22 @@ export async function createApartment(
   }
   const id = apartmentDocId(towerId, number)
   const ref = doc(db, 'condominiums', condoId, 'apartments', id)
+  const existingInTower = await getDocs(
+    query(collection(db, 'condominiums', condoId, 'apartments'), where('towerId', '==', towerId)),
+  )
 
   await runTransaction(db, async (tx) => {
     const tower = await tx.get(doc(db, 'condominiums', condoId, 'towers', towerId))
     if (!tower.exists()) throw new BusinessRuleError('not-found', 'La torre no existe.')
     if ((await tx.get(ref)).exists()) {
       throw new BusinessRuleError('already-exists', `El apartamento ${number} ya existe en esa torre.`)
+    }
+    const maxCapacity = Number(tower.get('totalApartments') ?? 0)
+    if (maxCapacity > 0 && existingInTower.size >= maxCapacity) {
+      throw new BusinessRuleError(
+        'resource-exhausted',
+        `La torre ${towerId} ya alcanzó su capacidad declarada (${existingInTower.size}/${maxCapacity} unidades). Aumente la capacidad de la torre para agregar más apartamentos o casas.`,
+      )
     }
     tx.set(ref, {
       id,

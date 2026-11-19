@@ -268,6 +268,7 @@ export async function importCensusBatch(
   }
 
   const errors: CensusRowError[] = []
+  let skippedDuplicates = 0
   const toCreate: CensusRow[] = []
   const newCountByTower = new Map<string, number>()
   const touchedTowers = new Set<string>()
@@ -275,10 +276,23 @@ export async function importCensusBatch(
   for (const row of rows) {
     touchedTowers.add(row.towerId)
     if (existingIds.has(row.apartmentId)) {
+      skippedDuplicates += 1
       errors.push({
         rowNumber: row.rowNumber,
         raw: `${row.towerId},${row.apartmentNumber},${row.residentName}`,
         reason: `El apartamento ${row.apartmentId} ya existe en Firestore.`,
+      })
+      continue
+    }
+    const existingTower = existingTowers.get(row.towerId)
+    const declaredCapacity = existingTower?.totalApartments
+    const plannedTotal =
+      (existingCountByTower.get(row.towerId) ?? 0) + (newCountByTower.get(row.towerId) ?? 0)
+    if (typeof declaredCapacity === 'number' && declaredCapacity > 0 && plannedTotal >= declaredCapacity) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        raw: `${row.towerId},${row.apartmentNumber},${row.residentName}`,
+        reason: `La torre ${row.towerId} ya alcanzó su capacidad declarada (${declaredCapacity} unidades).`,
       })
       continue
     }
@@ -288,7 +302,7 @@ export async function importCensusBatch(
 
   let batchesCommitted = 0
 
-  // Fase 1: torres del conjunto (preservando nombre y sin reducir capacidad en torres existentes).
+  // Fase 1: torres del conjunto (respetando la capacidad declarada de torres existentes).
   const towerIds = Array.from(touchedTowers)
   for (const chunk of chunkArray(towerIds, chunkSize)) {
     const batch = writeBatch(db)
@@ -298,13 +312,9 @@ export async function importCensusBatch(
         towerId.startsWith('T') && /^T\d+$/.test(towerId)
           ? `Torre ${towerId.slice(1)}`
           : `Torre ${towerId}`
-      const totalAfterImport =
-        (existingCountByTower.get(towerId) ?? 0) + (newCountByTower.get(towerId) ?? 0)
-      const totalApartments = Math.max(
-        existing?.totalApartments ?? 0,
-        totalAfterImport,
-        1,
-      )
+      const totalApartments = existing?.totalApartments
+        ? existing.totalApartments
+        : Math.max(newCountByTower.get(towerId) ?? 0, 1)
 
       batch.set(
         doc(db, 'condominiums', condoId, 'towers', towerId),
@@ -341,7 +351,7 @@ export async function importCensusBatch(
     towersProcessed: towerIds.length,
     apartmentsCreated: toCreate.length,
     batchesCommitted,
-    skippedDuplicates: errors.length,
+    skippedDuplicates,
     errors,
   }
 }
