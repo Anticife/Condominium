@@ -927,7 +927,7 @@ export default function AdminConsole({
                         <td className="font-mono" style={{ fontSize: '12px' }}>{u.email}</td>
                         <td>
                           <span className={`cds-tag ${u.role === 'administradora' ? 'cds-tag-blue' : u.role === 'portero' ? 'cds-tag-dark' : 'cds-tag-green'}`}>
-                            {u.role}
+                            {u.role === 'administradora' ? 'ADMINISTRADOR' : u.role}
                           </span>
                         </td>
                         <td className="font-mono">{u.unitId || '—'}</td>

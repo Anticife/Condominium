@@ -299,7 +299,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
               <div><strong>Correo:</strong> {userProfile.email}</div>
               <div><strong>Verificado:</strong> {isVerified ? 'Sí' : 'Pendiente'}</div>
               <div><strong>UID:</strong> {userProfile.uid}</div>
-              <div><strong>Rol actual:</strong> {userProfile.role}</div>
+              <div><strong>Rol actual:</strong> {userProfile.role === 'administradora' ? 'Administrador' : userProfile.role}</div>
             </div>
             <button type="button" className="cds-btn cds-btn-secondary" onClick={handleSignOut} style={{ width: '100%' }}>
               <LogOut size={16} />

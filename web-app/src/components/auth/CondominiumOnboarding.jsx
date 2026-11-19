@@ -244,7 +244,7 @@ export default function CondominiumOnboarding({ userProfile }) {
           {tab === 'create' ? (
             <form onSubmit={handleCreateCondominium}>
               <p style={{ fontSize: '13px', color: '#525252', marginBottom: '16px', lineHeight: 1.45 }}>
-                Crea un espacio aislado para tu copropiedad. Quedarás asignado como <strong>Administradora</strong> y obtendrás un código de invitación único para tus residentes y porteros.
+                Crea un espacio aislado para tu copropiedad. Quedarás asignado como <strong>Administrador</strong> y obtendrás un código de invitación único para tus residentes y porteros.
               </p>
 
               <div style={{ marginBottom: '12px' }}>
@@ -309,7 +309,7 @@ export default function CondominiumOnboarding({ userProfile }) {
               </div>
 
               <button type="submit" className="cds-btn cds-btn-primary" style={{ width: '100%' }} disabled={submitting}>
-                <span>{submitting ? 'CREANDO CONJUNTO...' : 'CREAR CONJUNTO Y ENTRAR COMO ADMINISTRADORA'}</span>
+                <span>{submitting ? 'CREANDO CONJUNTO...' : 'CREAR CONJUNTO Y ENTRAR COMO ADMINISTRADOR'}</span>
                 <ArrowRight size={16} />
               </button>
             </form>

@@ -294,7 +294,7 @@ export default function App() {
 
   const handleSetStaffRole = async (userId, role) => {
     await setStaffRole(db, condoId, userId, role);
-    showToast('success', `Rol actualizado a '${role}'.`);
+    showToast('success', `Rol actualizado a '${role === 'administradora' ? 'Administrador' : role}'.`);
   };
 
   const handleToggleUserActive = async (userId, isActive) => {
