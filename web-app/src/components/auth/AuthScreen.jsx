@@ -16,6 +16,9 @@ import {
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  reload,
   updateProfile,
   signOut,
 } from 'firebase/auth';
@@ -57,7 +60,65 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
   const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [infoMsg, setInfoMsg] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [sendingVerification, setSendingVerification] = useState(false);
+  const [checkingVerification, setCheckingVerification] = useState(false);
+  const [emailVerifiedState, setEmailVerifiedState] = useState(Boolean(authUser?.emailVerified));
+
+  const handleSendVerification = async () => {
+    if (!authUser) return;
+    setSendingVerification(true);
+    setErrorMsg(null);
+    setInfoMsg(null);
+    try {
+      await sendEmailVerification(authUser, { url: window.location.origin });
+      setInfoMsg(`Correo de verificación enviado a ${authUser.email}. Revise su bandeja de entrada o carpeta de Spam.`);
+    } catch (err) {
+      setErrorMsg(mapFirebaseAuthError(err));
+    } finally {
+      setSendingVerification(false);
+    }
+  };
+
+  const handleRefreshVerification = async () => {
+    if (!authUser) return;
+    setCheckingVerification(true);
+    setErrorMsg(null);
+    setInfoMsg(null);
+    try {
+      await reload(authUser);
+      const verified = Boolean(auth.currentUser?.emailVerified);
+      setEmailVerifiedState(verified);
+      if (verified) {
+        setInfoMsg('Correo electrónico verificado correctamente.');
+      } else {
+        setInfoMsg('El correo aún aparece sin verificar. Abra el enlace enviado a su bandeja de entrada y vuelva a pulsar este botón.');
+      }
+    } catch (err) {
+      setErrorMsg(mapFirebaseAuthError(err));
+    } finally {
+      setCheckingVerification(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    setErrorMsg(null);
+    setInfoMsg(null);
+    if (!email.trim() || !email.includes('@')) {
+      setErrorMsg('Ingrese primero su correo electrónico en el campo de arriba para enviarle el enlace de recuperación.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await sendPasswordResetEmail(auth, email.trim(), { url: window.location.origin });
+      setInfoMsg(`Se envió un enlace de recuperación de contraseña a ${email.trim()}. Revise su bandeja de entrada o Spam.`);
+    } catch (err) {
+      setErrorMsg(mapFirebaseAuthError(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleSignOut = async () => {
     setErrorMsg(null);
@@ -163,6 +224,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
 
   // Residente activo pero pendiente de asignación de apartamento (CON-01 / CON-02)
   if (authUser && userProfile && userProfile.role === 'residente' && !userProfile.unitId) {
+    const isVerified = emailVerifiedState || Boolean(authUser.emailVerified);
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#f4f4f4', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
         <div style={{ backgroundColor: '#ffffff', border: '1px solid #161616', maxWidth: '560px', width: '100%' }}>
@@ -174,13 +236,68 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
             </div>
           </div>
           <div style={{ padding: '24px' }}>
+            {errorMsg && (
+              <div style={{ backgroundColor: '#fff1f1', border: '1px solid #ffb3b8', color: '#a2191f', padding: '10px 12px', fontSize: '12px', marginBottom: '14px' }}>
+                {errorMsg}
+              </div>
+            )}
+            {infoMsg && (
+              <div style={{ backgroundColor: '#defbe6', border: '1px solid #42be65', color: '#0e6027', padding: '10px 12px', fontSize: '12px', marginBottom: '14px' }}>
+                {infoMsg}
+              </div>
+            )}
+
             <div style={{ backgroundColor: '#edf5ff', borderLeft: '4px solid #0f62fe', padding: '12px 14px', fontSize: '13px', color: '#002d9c', marginBottom: '16px' }}>
               <CheckCircle2 size={15} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
               Su registro como residente se completó correctamente. Por seguridad y protección de datos (Ley 1581), la Administración debe asociar su cuenta a su apartamento antes de habilitar paquetes, reservas y autorizados.
             </div>
+
+            {/* Estado de verificación de correo */}
+            <div style={{
+              backgroundColor: isVerified ? '#defbe6' : '#fcf4d6',
+              borderLeft: `4px solid ${isVerified ? '#24a148' : '#f1c21b'}`,
+              padding: '12px 14px',
+              fontSize: '12px',
+              color: '#161616',
+              marginBottom: '16px',
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: '6px' }}>
+                {isVerified ? 'Correo electrónico verificado' : 'Correo electrónico pendiente de verificación'}
+              </div>
+              {!isVerified && (
+                <>
+                  <p style={{ color: '#393939', marginBottom: '10px', lineHeight: 1.4 }}>
+                    Verifique su correo (<span className="font-mono">{authUser.email}</span>) mediante el enlace enviado por Firebase Authentication. Si aún no lo recibió, pulse el botón para reenviarlo (revise también Spam).
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="cds-btn cds-btn-primary"
+                      style={{ height: '32px', minHeight: '32px', fontSize: '12px', padding: '0 12px' }}
+                      onClick={handleSendVerification}
+                      disabled={sendingVerification}
+                    >
+                      <Mail size={14} />
+                      <span>{sendingVerification ? 'Enviando...' : 'Enviar / Reenviar correo de verificación'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="cds-btn cds-btn-secondary"
+                      style={{ height: '32px', minHeight: '32px', fontSize: '12px', padding: '0 12px' }}
+                      onClick={handleRefreshVerification}
+                      disabled={checkingVerification}
+                    >
+                      <span>{checkingVerification ? 'Comprobando...' : 'Ya verifiqué mi correo'}</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
             <div style={{ backgroundColor: '#f4f4f4', padding: '12px 14px', fontSize: '12px', marginBottom: '20px', fontFamily: 'var(--cds-font-mono)' }}>
               <div><strong>Usuario:</strong> {userProfile.displayName || '—'}</div>
               <div><strong>Correo:</strong> {userProfile.email}</div>
+              <div><strong>Verificado:</strong> {isVerified ? 'Sí' : 'Pendiente'}</div>
               <div><strong>UID:</strong> {userProfile.uid}</div>
               <div><strong>Rol actual:</strong> {userProfile.role}</div>
             </div>
@@ -246,6 +363,12 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
         displayName: fullName.trim(),
         phone: phone.trim(),
       });
+      try {
+        await sendEmailVerification(cred.user, { url: window.location.origin });
+        setInfoMsg(`Correo de verificación enviado a ${cred.user.email}. Revise su bandeja de entrada o Spam.`);
+      } catch (verifyErr) {
+        console.warn('sendEmailVerification warning:', verifyErr);
+      }
     } catch (err) {
       setErrorMsg(mapFirebaseAuthError(err));
     } finally {
@@ -298,7 +421,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
         <div style={{ display: 'flex', borderBottom: '1px solid #e0e0e0', backgroundColor: '#f4f4f4' }}>
           <button
             type="button"
-            onClick={() => { setMode('login'); setErrorMsg(null); }}
+            onClick={() => { setMode('login'); setErrorMsg(null); setInfoMsg(null); }}
             style={{
               flex: 1,
               padding: '12px',
@@ -315,7 +438,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
           </button>
           <button
             type="button"
-            onClick={() => { setMode('register'); setErrorMsg(null); }}
+            onClick={() => { setMode('register'); setErrorMsg(null); setInfoMsg(null); }}
             style={{
               flex: 1,
               padding: '12px',
@@ -348,6 +471,23 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
             }}>
               <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
               <div>{errorMsg}</div>
+            </div>
+          )}
+
+          {infoMsg && (
+            <div style={{
+              backgroundColor: '#defbe6',
+              border: '1px solid #42be65',
+              color: '#0e6027',
+              padding: '10px 12px',
+              fontSize: '12px',
+              marginBottom: '16px',
+              display: 'flex',
+              gap: '8px',
+              alignItems: 'flex-start',
+            }}>
+              <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>{infoMsg}</div>
             </div>
           )}
 
@@ -391,6 +531,25 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
                 <span>{submitting ? 'VERIFICANDO CREDENCIALES...' : 'INGRESAR AL SISTEMA'}</span>
                 <ArrowRight size={16} />
               </button>
+
+              <div style={{ marginTop: '12px', textAlign: 'right' }}>
+                <button
+                  type="button"
+                  onClick={handlePasswordReset}
+                  disabled={submitting}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#0f62fe',
+                    fontSize: '12px',
+                    textDecoration: 'underline',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  ¿Olvidaste tu contraseña? Enviar correo de recuperación
+                </button>
+              </div>
             </form>
           ) : (
             <form onSubmit={handleRegister}>

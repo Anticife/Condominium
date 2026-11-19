@@ -31,6 +31,7 @@ try {
 
 try {
   auth = getAuth(app)
+  auth.languageCode = 'es'
 } catch (e) {
   console.warn('Firebase getAuth warning (Identity Platform pending in console):', e)
   auth = {} as Auth
