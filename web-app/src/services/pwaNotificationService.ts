@@ -207,7 +207,13 @@ export function detectNewUsersNotifications(
   const alerts: LocalNotificationPayload[] = []
 
   for (const user of next) {
-    if (!prevIds.has(user.uid) && user.uid !== currentUid) {
+    if (
+      !prevIds.has(user.uid)
+      && user.uid !== currentUid
+      && user.role === 'residente'
+      && !user.unitId
+      && user.isActive !== false
+    ) {
       alerts.push({
         title: 'Nuevo usuario en el conjunto',
         body: `${user.displayName || user.email} se unió y espera asignación.`,

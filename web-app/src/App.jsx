@@ -193,13 +193,19 @@ export default function App() {
   }, [authUser?.uid, dispatchRealtimeAlerts, showToast]);
 
   // 3. Tenant-scoped + role-scoped Firestore subscriptions (strictly compliant with firestore.rules)
+  const subUid = userProfile?.uid;
+  const subIsActive = userProfile?.isActive === true;
+  const subCondoId = userProfile?.condominiumId;
+  const subRole = userProfile?.role;
+  const subUnitId = userProfile?.unitId;
+
   useEffect(() => {
-    if (!userProfile || userProfile.isActive !== true || !userProfile.condominiumId) {
+    if (!subUid || !subIsActive || !subCondoId) {
       return undefined;
     }
-    const condoId = userProfile.condominiumId;
-    const role = userProfile.role;
-    const currentUid = userProfile.uid;
+    const condoId = subCondoId;
+    const role = subRole;
+    const currentUid = subUid;
     const unsubscribers = [];
     const onSubError = (scope) => (err) => {
       console.error(`Firestore subscription error (${scope}):`, err);
@@ -255,8 +261,8 @@ export default function App() {
       unsubscribers.push(subscribeToAllPackages(db, condoId, handlePackagesSnapshot, onSubError('packages')));
       unsubscribers.push(subscribeToAllReservations(db, condoId, handleReservationsSnapshot, onSubError('reservations')));
       unsubscribers.push(subscribeToAllPqrs(db, condoId, handlePqrsSnapshot, onSubError('pqrs')));
-    } else if (role === 'residente' && userProfile.unitId) {
-      const unitId = userProfile.unitId;
+    } else if (role === 'residente' && subUnitId) {
+      const unitId = subUnitId;
       unsubscribers.push(subscribeToApartment(db, condoId, unitId, setResidentApartment, onSubError('apartment')));
       unsubscribers.push(subscribeToAuthorized(db, condoId, unitId, setResidentAuthorized, onSubError('authorized')));
       unsubscribers.push(subscribeToAllApartmentPackages(db, condoId, unitId, handlePackagesSnapshot, onSubError('packages')));
@@ -273,7 +279,7 @@ export default function App() {
         }
       });
     };
-  }, [userProfile, dispatchRealtimeAlerts]);
+  }, [subUid, subIsActive, subCondoId, subRole, subUnitId, dispatchRealtimeAlerts]);
 
   const handleLogout = async () => {
     await signOut(auth);

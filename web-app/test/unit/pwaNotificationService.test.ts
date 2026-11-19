@@ -116,6 +116,10 @@ describe('pwaNotificationService diff detectors', () => {
     expect(userAlerts).toHaveLength(1)
     expect(userAlerts[0].body).toContain('María')
 
+    const alreadyAssigned: UserProfile = { ...u1, uid: 'u-2', unitId: 'T1-101' }
+    const guardUser: UserProfile = { ...u1, uid: 'u-3', role: 'portero' }
+    expect(detectNewUsersNotifications([], [alreadyAssigned, guardUser], 'admin-1')).toHaveLength(0)
+
     const updated: UserProfile = { ...u1, unitId: 'T1-202' }
     const profAlerts = detectOwnProfileNotifications(u1, updated)
     expect(profAlerts).toHaveLength(1)
