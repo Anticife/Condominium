@@ -69,10 +69,18 @@ describe.skipIf(!hasEmulator)('importCensusBatch (SCRUM-43 emulator)', () => {
     const report = await importCensusFromCsv(adminDb, csv, { chunkSize: 2 })
 
     expect(report.towersProcessed).toBe(3)
+    expect(report.towersCreated).toBe(2) // T1 ya existía en el seed
     expect(report.apartmentsCreated).toBe(4)
+    expect(report.invitationsCreated).toBe(4)
     expect(report.skippedDuplicates).toBe(1)
-    expect(report.batchesCommitted).toBe(4) // 2 batches de torres (2+1) + 2 batches de aptos (2+2)
+    // 1 batch de torres nuevas (T2, T3) + 2 de aptos (2+2) + 2 de pre-registros (2+2)
+    expect(report.batchesCommitted).toBe(5)
     expect(report.errors[0].reason).toContain('T1-101')
+
+    // La torre existente conserva su total de apartamentos.
+    expect((await getDoc(doc(adminDb, 'towers/T1'))).get('totalApartments')).toBe(80)
+    expect((await getDoc(doc(adminDb, 'residentInvitations/carlos@test.co'))).data())
+      .toMatchObject({ fullName: 'Carlos Nuevo', apartmentId: 'T1-201', isOwner: true })
 
     const t3Snap = await getDoc(doc(adminDb, 'towers/T3'))
     expect(t3Snap.exists()).toBe(true)
@@ -88,5 +96,26 @@ describe.skipIf(!hasEmulator)('importCensusBatch (SCRUM-43 emulator)', () => {
     await assertFails(importCensusBatch(dbAs(env, UIDS.res101), validRows))
     await assertFails(importCensusBatch(dbAs(env, UIDS.portero), validRows))
     await assertFails(importCensusBatch(anonDb(env), validRows))
+  })
+
+  it('acepta «Torre 1» y no duplica pre-registros en una segunda carga', async () => {
+    const adminDb = dbAs(env, UIDS.admin)
+    const csv = 'Torre;Apartamento;NombreResidente;Email;Telefono;EsPropietario\nTorre 2;504;Ana Lucía Torres;Ana@Test.co;301;Sí'
+    const first = await importCensusFromCsv(adminDb, csv)
+    expect(first).toMatchObject({ towersCreated: 1, apartmentsCreated: 1, invitationsCreated: 1 })
+    expect((await getDoc(doc(adminDb, 'apartments/T2-504'))).exists()).toBe(true)
+    expect((await getDoc(doc(adminDb, 'residentInvitations/ana@test.co'))).exists()).toBe(true)
+
+    const second = await importCensusFromCsv(adminDb, csv)
+    expect(second).toMatchObject({ apartmentsCreated: 0, invitationsCreated: 0, skippedDuplicates: 1 })
+  })
+
+  it('solo la administradora lee los pre-registros (RN-B7)', async () => {
+    await importCensusFromCsv(dbAs(env, UIDS.admin),
+      'Torre,Apartamento,NombreResidente,Email,Telefono,EsPropietario\nT1,201,Carlos,carlos@test.co,300,Si')
+    for (const db of [dbAs(env, UIDS.portero), dbAs(env, UIDS.res101), anonDb(env)]) {
+      await assertFails(getDoc(doc(db, 'residentInvitations/carlos@test.co')))
+      await assertFails(getDocs(collection(db, 'residentInvitations')))
+    }
   })
 })

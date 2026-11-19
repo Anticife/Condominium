@@ -4,6 +4,8 @@
  * Columnas esperadas:
  *   Torre, Apartamento, NombreResidente, Email, Telefono, EsPropietario
  *
+ * Plantilla descargable: /plantilla-censo.csv. Torre admite «Torre 1», «T1» o «1».
+ *
  * Estrategia plan Spark:
  * - Validación de esquema fila por fila sin abortar el lote ante errores individuales.
  * - Escritura por lotes (`writeBatch`) en chunks de máximo 400 operaciones.
@@ -12,6 +14,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   serverTimestamp,
   writeBatch,
@@ -46,7 +49,11 @@ export interface ParseCensusResult {
 
 export interface CensusImportReport {
   towersProcessed: number
+  /** Torres nuevas; las existentes no se modifican. */
+  towersCreated: number
   apartmentsCreated: number
+  /** Pre-registros de residentes (residentInvitations/{email}). */
+  invitationsCreated: number
   batchesCommitted: number
   skippedDuplicates: number
   errors: CensusRowError[]
@@ -89,6 +96,17 @@ function splitCsvLine(line: string, delimiter: string): string[] {
   }
   fields.push(current.trim())
   return fields
+}
+
+/**
+ * «Torre 1», «T1» o «1» -> 'T1'. Otros códigos se pasan a mayúsculas con «_»
+ * en lugar de espacios (p. ej. «Bloque A» -> 'BLOQUE_A').
+ */
+export function normalizeTowerId(raw: string): string {
+  const value = raw.trim()
+  const numbered = /^(?:torre|t)?\s*(\d{1,3})$/i.exec(value)
+  if (numbered) return `T${Number(numbered[1])}`
+  return value.toUpperCase().replace(/\s+/g, '_')
 }
 
 function parseBoolean(value: string): boolean | null {
@@ -154,7 +172,7 @@ export function parseCensusCsv(csvText: string): ParseCensusResult {
     const rowNumber = i + 1
     const cols = splitCsvLine(raw, delimiter)
 
-    const rawTower = (cols[colIndex.torre] ?? '').trim().toUpperCase()
+    const rawTower = normalizeTowerId(cols[colIndex.torre] ?? '')
     const rawApt = (cols[colIndex.apartamento] ?? '').trim().toUpperCase()
     const residentName = (cols[colIndex.nombre] ?? '').trim()
     const email = colIndex.email >= 0 ? (cols[colIndex.email] ?? '').trim() : ''
@@ -237,7 +255,9 @@ export async function importCensusBatch(
   if (rows.length === 0) {
     return {
       towersProcessed: 0,
+      towersCreated: 0,
       apartmentsCreated: 0,
+      invitationsCreated: 0,
       batchesCommitted: 0,
       skippedDuplicates: 0,
       errors: [],
@@ -245,8 +265,12 @@ export async function importCensusBatch(
   }
 
   // Consultar apartamentos existentes para detectar duplicados sin abortar los lotes.
-  const existingSnap = await getDocs(collection(db, 'apartments'))
+  const [existingSnap, towersSnap] = await Promise.all([
+    getDocs(collection(db, 'apartments')),
+    getDocs(collection(db, 'towers')),
+  ])
   const existingIds = new Set(existingSnap.docs.map((d) => d.id))
+  const existingTowers = new Set(towersSnap.docs.map((d) => d.id))
 
   const towerCounts = new Map<string, number>()
   for (const row of rows) {
@@ -255,9 +279,12 @@ export async function importCensusBatch(
 
   let batchesCommitted = 0
 
-  // Fase 1: torres (deben existir antes de crear los apartamentos por firestore.rules).
+  // Fase 1: torres nuevas (deben existir antes de crear los apartamentos por
+  // firestore.rules). Las torres existentes no se tocan: sobrescribirlas
+  // reemplazaría su totalApartments por las filas que trae el archivo.
   const towerEntries = Array.from(towerCounts.entries())
-  for (const chunk of chunkArray(towerEntries, chunkSize)) {
+  const newTowers = towerEntries.filter(([towerId]) => !existingTowers.has(towerId))
+  for (const chunk of chunkArray(newTowers, chunkSize)) {
     const batch = writeBatch(db)
     for (const [towerId, count] of chunk) {
       batch.set(
@@ -267,7 +294,6 @@ export async function importCensusBatch(
           name: towerId.startsWith('T') && /^T\d+$/.test(towerId) ? `Torre ${towerId.slice(1)}` : `Torre ${towerId}`,
           totalApartments: count,
         },
-        { merge: true },
       )
     }
     await batch.commit()
@@ -306,9 +332,36 @@ export async function importCensusBatch(
     batchesCommitted += 1
   }
 
+  // Fase 3: pre-registro de cada residente con correo. Sin Cloud Functions no
+  // se pueden crear cuentas de Auth desde el navegador; cuando el residente
+  // se registre, la administradora usa este pre-registro para asignarle su
+  // apartamento (assignResidentToApartment). Los ya pre-registrados se omiten.
+  const invitationsSnap = await getDocs(collection(db, 'residentInvitations'))
+  const existingInvites = new Set(invitationsSnap.docs.map((d) => d.id))
+  const invitations = toCreate.filter((row) => row.email && !existingInvites.has(row.email.toLowerCase()))
+  for (const chunk of chunkArray(invitations, chunkSize)) {
+    const batch = writeBatch(db)
+    for (const row of chunk) {
+      const email = row.email.toLowerCase()
+      batch.set(doc(db, 'residentInvitations', email), {
+        email,
+        fullName: row.residentName,
+        phone: row.phone,
+        apartmentId: row.apartmentId,
+        towerId: row.towerId,
+        isOwner: row.isOwner,
+        importedAt: serverTimestamp(),
+      })
+    }
+    await batch.commit()
+    batchesCommitted += 1
+  }
+
   return {
     towersProcessed: towerEntries.length,
+    towersCreated: newTowers.length,
     apartmentsCreated: toCreate.length,
+    invitationsCreated: invitations.length,
     batchesCommitted,
     skippedDuplicates: errors.length,
     errors,
@@ -327,4 +380,37 @@ export async function importCensusFromCsv(
     ...batchReport,
     errors: [...parsed.errors, ...batchReport.errors],
   }
+}
+
+// ---------- Lectura de archivos (CSV o Excel) ----------
+
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  const text = value instanceof Date ? value.toISOString().slice(0, 10) : String(value)
+  return /[",;\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+/** Convierte una hoja (filas x celdas) a texto CSV para parseCensusCsv. */
+export function tableToCsv(rows: unknown[][]): string {
+  return rows.map((row) => row.map(csvCell).join(',')).join('\n')
+}
+
+/**
+ * Lee el archivo que elige la administradora (.csv o .xlsx) y lo devuelve como
+ * texto CSV listo para importCensusFromCsv.
+ */
+export async function readCensusFile(file: File): Promise<string> {
+  const name = file.name.toLowerCase()
+  if (name.endsWith('.csv')) return file.text()
+  if (name.endsWith('.xlsx')) {
+    const { readSheet } = await import('read-excel-file/browser')
+    return tableToCsv(await readSheet(file))
+  }
+  throw new BusinessRuleError('invalid-argument', 'Formato no soportado. Use la plantilla en .csv o .xlsx.')
+}
+
+/** Pre-registro de un residente importado, para asignarle su apartamento. */
+export async function getResidentInvitation(db: Firestore, email: string) {
+  const snap = await getDoc(doc(db, 'residentInvitations', email.trim().toLowerCase()))
+  return snap.exists() ? snap.data() : null
 }

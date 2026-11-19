@@ -35,6 +35,18 @@ npm test             # lógica sin emulador
 npm run test:rules   # reglas + servicios contra el emulador de Firestore (requiere Java 11+)
 ```
 
+GitHub Actions corre toda la suite con el emulador en cada pull request (`.github/workflows/rules-tests.yml`).
+
+### Carga del censo (SCRUM-43)
+
+- Plantilla: `public/plantilla-censo.csv` (columnas `Torre;Apartamento;NombreResidente;Email;Telefono;EsPropietario`).
+  La torre puede escribirse «Torre 1», «T1» o «1».
+- `readCensusFile(file)` acepta `.csv` o `.xlsx` y devuelve el texto para `importCensusFromCsv(db, texto)`.
+- Las torres que ya existen no se modifican.
+- Cada residente con correo queda pre-registrado en `residentInvitations/{email}` (solo lo ve la administradora).
+  Sin Cloud Functions no se pueden crear cuentas desde el navegador: el residente se registra con ese correo y la
+  administradora le asigna su apartamento con `assignResidentToApartment`, usando `getResidentInvitation(db, email)`.
+
 ### Primera administradora
 
 No hay Cloud Functions, así que la primera cuenta con rol `administradora` se crea a mano:

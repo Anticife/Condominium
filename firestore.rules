@@ -302,6 +302,21 @@ service cloud.firestore {
     }
 
     // ==========================================
+    // PRE-REGISTRO DE RESIDENTES (residentInvitations/{email}) — SCRUM-43
+    // Lo escribe el importador del censo. Solo la administradora lo ve: tiene
+    // correos y teléfonos (RN-B7, Ley 1581).
+    // ==========================================
+    match /residentInvitations/{email} {
+      allow read, delete: if hasRole('administradora');
+      allow create, update: if hasRole('administradora')
+        && request.resource.data.keys().hasOnly(['email', 'fullName', 'phone', 'apartmentId', 'towerId', 'isOwner', 'importedAt'])
+        && request.resource.data.email == email
+        && isNonEmptyString(request.resource.data.fullName)
+        && request.resource.data.isOwner is bool
+        && exists(apartmentPath(request.resource.data.apartmentId));
+    }
+
+    // ==========================================
     // CONTADORES Y RADICACIÓN (counters/pqrs) — SCRUM-31
     // ==========================================
     match /counters/pqrs {
