@@ -37,6 +37,8 @@ import {
   subscribeToApartmentReservations,
   subscribeToAllReservations,
 } from './services/reservationService';
+import { parseAuthActionParams } from './services/authActionUtils';
+import AuthActionHandler from './components/auth/AuthActionHandler';
 import AuthScreen from './components/auth/AuthScreen';
 import CarbonMasthead from './components/layout/CarbonMasthead';
 import GuardTerminal from './components/guard/GuardTerminal';
@@ -44,6 +46,9 @@ import ResidentPortal from './components/resident/ResidentPortal';
 import AdminConsole from './components/admin/AdminConsole';
 
 export default function App() {
+  const [authAction, setAuthAction] = useState(() =>
+    typeof window !== 'undefined' ? parseAuthActionParams(window.location.search) : null,
+  );
   const [authReady, setAuthReady] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -145,6 +150,17 @@ export default function App() {
   const handleLogout = async () => {
     await signOut(auth);
   };
+
+  const handleAuthActionDone = useCallback(() => {
+    setAuthAction(null);
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({}, document.title, '/');
+    }
+  }, []);
+
+  if (authAction) {
+    return <AuthActionHandler action={authAction} onDone={handleAuthActionDone} />;
+  }
 
   // Loading Firebase Auth initialization
   if (!authReady) {
