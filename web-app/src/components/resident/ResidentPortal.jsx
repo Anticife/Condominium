@@ -9,6 +9,10 @@ import {
   AlertCircle,
   CheckCircle2,
   UserCheck,
+  History,
+  Send,
+  Clock,
+  X,
 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import {
@@ -21,11 +25,28 @@ import {
   validateReservationRequest,
 } from '../../services/reservationService';
 import {
+  PQRS_CATEGORIES,
+  subscribeToPqrsHistory,
+} from '../../services/pqrsService';
+import {
   formatDateCO,
   formatDateTimeCO,
   formatTimeCO,
   getElapsedHours,
 } from '../../services/dateUtils';
+
+const PQRS_CATEGORY_LABELS = {
+  Peticion: 'Petición',
+  Queja: 'Queja',
+  Reclamo: 'Reclamo',
+  Sugerencia: 'Sugerencia',
+};
+
+const PQRS_STATUS_TAG = {
+  Radicada: 'cds-tag-blue',
+  'En gestión': 'cds-tag-yellow',
+  Resuelta: 'cds-tag-green',
+};
 
 export default function ResidentPortal({
   condoId,
@@ -34,7 +55,9 @@ export default function ResidentPortal({
   authorizedPeople,
   packages,
   reservations,
+  pqrs = [],
   onRequestReservation,
+  onFilePqrs,
   onAddAuthorized,
   onToggleAuthorized,
   onRemoveAuthorized,
@@ -65,6 +88,36 @@ export default function ResidentPortal({
   const [contactName, setContactName] = useState(currentUser?.displayName || '');
   const [contactPhone, setContactPhone] = useState(currentUser?.phone || '');
   const [contactMsg, setContactMsg] = useState(null);
+
+  // PQRS Form & History State (CON-08, RN-B6)
+  const [pqrsCategory, setPqrsCategory] = useState('Peticion');
+  const [pqrsSubject, setPqrsSubject] = useState('');
+  const [pqrsDescription, setPqrsDescription] = useState('');
+  const [pqrsSubmitting, setPqrsSubmitting] = useState(false);
+  const [pqrsError, setPqrsError] = useState(null);
+  const [pqrsSuccess, setPqrsSuccess] = useState(null);
+  const [historyTicket, setHistoryTicket] = useState(null);
+  const [historyEntries, setHistoryEntries] = useState([]);
+  const [historyLoadedId, setHistoryLoadedId] = useState(null);
+  const historyLoading = Boolean(historyTicket?.id && historyLoadedId !== historyTicket.id);
+
+  useEffect(() => {
+    if (!historyTicket?.id) return undefined;
+    const ticketId = historyTicket.id;
+    const unsub = subscribeToPqrsHistory(
+      db,
+      condoId,
+      ticketId,
+      (entries) => {
+        setHistoryEntries(entries);
+        setHistoryLoadedId(ticketId);
+      },
+      () => {
+        setHistoryLoadedId(ticketId);
+      },
+    );
+    return () => unsub();
+  }, [condoId, historyTicket?.id]);
 
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 60_000);
@@ -166,8 +219,38 @@ export default function ResidentPortal({
     }
   };
 
+  const handlePqrsSubmit = async (e) => {
+    e.preventDefault();
+    setPqrsError(null);
+    setPqrsSuccess(null);
+
+    if (!pqrsSubject.trim() || !pqrsDescription.trim()) {
+      setPqrsError('Complete el asunto y la descripción para radicar su solicitud.');
+      return;
+    }
+
+    setPqrsSubmitting(true);
+    try {
+      const res = await onFilePqrs({
+        apartmentId: currentUser.unitId,
+        residentId: currentUser.uid,
+        category: pqrsCategory,
+        subject: pqrsSubject.trim(),
+        description: pqrsDescription.trim(),
+      });
+      setPqrsSuccess(`Radicado oficial asignado: ${res.ticketNumber}. Puede consultar su trazabilidad en la lista inferior.`);
+      setPqrsSubject('');
+      setPqrsDescription('');
+    } catch (err) {
+      setPqrsError(err?.message || 'No se pudo radicar la PQRS en Cloud Firestore.');
+    } finally {
+      setPqrsSubmitting(false);
+    }
+  };
+
   const pendingPackagesCount = packages.filter((p) => p.status === 'Pendiente').length;
   const nonResidentAuthorizedCount = authorizedPeople.filter((a) => a.relation !== 'residente' && a.isActive).length;
+  const openPqrsCount = pqrs.filter((t) => t.status !== 'Resuelta').length;
 
   return (
     <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px' }}>
@@ -215,7 +298,7 @@ export default function ResidentPortal({
             { id: 'reservations', label: 'Zonas Comunes (Reservas)', icon: Calendar, badge: reservations.length },
             { id: 'authorized', label: 'Personas Autorizadas', icon: ShieldCheck, badge: nonResidentAuthorizedCount },
             { id: 'profile', label: 'Mi Perfil (Ley 1581)', icon: UserCheck, badge: 0 },
-            { id: 'pqrs', label: 'PQRS (Sprint 2)', icon: FileText, badge: 0 },
+            { id: 'pqrs', label: 'PQRS', icon: FileText, badge: openPqrsCount },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -736,15 +819,288 @@ export default function ResidentPortal({
         </div>
       )}
 
-      {/* TAB 5: PQRS (Programado Sprint 2: CON-08) */}
+      {/* TAB 5: PQRS CON RADICADO CONSECUTIVO E HISTORIAL INMUTABLE (CON-08 / CON-09 / RN-B6) */}
       {activeTab === 'pqrs' && (
-        <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderLeft: '4px solid #0f62fe', padding: '24px' }}>
-          <h3 style={{ fontSize: '17px', fontWeight: 600, color: '#161616', marginBottom: '6px' }}>
-            Módulo de PQRS con Radicado Consecutivo (CON-08 / CON-09)
-          </h3>
-          <p style={{ fontSize: '13px', color: '#525252' }}>
-            Este módulo corresponde al <strong>Sprint 2</strong> del tablero SCRUM y se conectará con radicación atómica en Firestore e historial inmutable (`RN-B6`) al iniciar dicho sprint.
-          </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', alignItems: 'start' }}>
+            {/* Radication Form */}
+            <div className="cds-tile" style={{ backgroundColor: '#ffffff' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#161616', marginBottom: '4px' }}>
+                Radicar Nueva PQRS
+              </h2>
+              <p style={{ fontSize: '13px', color: '#525252', marginBottom: '16px' }}>
+                Cada solicitud recibe un radicado consecutivo atómico (<span className="font-mono">PQ-YYYY-NNNN</span>) exclusivo para la unidad <strong className="font-mono">{currentUser.unitId}</strong>.
+              </p>
+
+              {pqrsError && (
+                <div
+                  style={{
+                    backgroundColor: '#fff1f1',
+                    border: '1px solid #ffb3b8',
+                    color: '#a2191f',
+                    padding: '10px 12px',
+                    fontSize: '12px',
+                    marginBottom: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <AlertCircle size={15} />
+                  <span>{pqrsError}</span>
+                </div>
+              )}
+
+              {pqrsSuccess && (
+                <div
+                  style={{
+                    backgroundColor: '#defbe6',
+                    border: '1px solid #6fdc8c',
+                    color: '#0e6027',
+                    padding: '10px 12px',
+                    fontSize: '12px',
+                    marginBottom: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <CheckCircle2 size={15} />
+                  <span>{pqrsSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handlePqrsSubmit}>
+                <div style={{ marginBottom: '12px' }}>
+                  <label htmlFor="res-pqrs-cat" className="cds-input-label">CATEGORÍA</label>
+                  <select
+                    id="res-pqrs-cat"
+                    className="cds-select"
+                    value={pqrsCategory}
+                    onChange={(e) => setPqrsCategory(e.target.value)}
+                  >
+                    {PQRS_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {PQRS_CATEGORY_LABELS[cat] || cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label htmlFor="res-pqrs-subject" className="cds-input-label">ASUNTO</label>
+                  <input
+                    id="res-pqrs-subject"
+                    type="text"
+                    className="cds-input"
+                    placeholder="Ej. Solicitud de revisión de iluminación en pasillo"
+                    value={pqrsSubject}
+                    onChange={(e) => setPqrsSubject(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <label htmlFor="res-pqrs-desc" className="cds-input-label">DESCRIPCIÓN DETALLADA</label>
+                  <textarea
+                    id="res-pqrs-desc"
+                    className="cds-input"
+                    rows={4}
+                    style={{ height: 'auto', padding: '10px 12px', resize: 'vertical' }}
+                    placeholder="Describa los hechos, ubicación o solicitud para facilitar la respuesta oficial de Administración."
+                    value={pqrsDescription}
+                    onChange={(e) => setPqrsDescription(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="cds-btn cds-btn-primary"
+                  style={{ width: '100%' }}
+                  disabled={pqrsSubmitting}
+                >
+                  <span>{pqrsSubmitting ? 'Asignando radicado...' : 'Radicar PQRS en Firestore'}</span>
+                  <Send size={15} />
+                </button>
+              </form>
+            </div>
+
+            {/* Unit PQRS List */}
+            <div className="cds-tile" style={{ backgroundColor: '#ffffff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '8px', flexWrap: 'wrap' }}>
+                <div>
+                  <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#161616' }}>
+                    Mis Radicados ({pqrs.length})
+                  </h2>
+                  <p style={{ fontSize: '12px', color: '#525252' }}>
+                    Seguimiento en tiempo real bajo aislamiento de unidad (RN-B7).
+                  </p>
+                </div>
+                <span className="cds-tag cds-tag-gray font-mono">
+                  {openPqrsCount} {openPqrsCount === 1 ? 'ABIERTA' : 'ABIERTAS'}
+                </span>
+              </div>
+
+              {pqrs.length === 0 ? (
+                <div style={{ padding: '32px 16px', textAlign: 'center', backgroundColor: '#f4f4f4', border: '1px solid #e0e0e0', color: '#525252', fontSize: '13px' }}>
+                  <FileText size={26} style={{ margin: '0 auto 8px', display: 'block', opacity: 0.45 }} />
+                  No ha radicado ninguna PQRS para la unidad {currentUser.unitId}.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {pqrs.map((ticket) => (
+                    <div
+                      key={ticket.id}
+                      style={{
+                        border: '1px solid #e0e0e0',
+                        padding: '14px',
+                        backgroundColor: '#ffffff',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span className="cds-tag cds-tag-dark font-mono">{ticket.ticketNumber}</span>
+                          <span className="cds-tag cds-tag-gray">
+                            {PQRS_CATEGORY_LABELS[ticket.category] || ticket.category}
+                          </span>
+                        </div>
+                        <span className={`cds-tag ${PQRS_STATUS_TAG[ticket.status] || 'cds-tag-gray'}`}>
+                          {ticket.status}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#161616' }}>
+                        {ticket.subject}
+                      </div>
+                      <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', lineHeight: 1.45 }}>
+                        {ticket.description}
+                      </p>
+
+                      {ticket.officialResponse && (
+                        <div
+                          style={{
+                            marginTop: '10px',
+                            padding: '10px 12px',
+                            backgroundColor: '#defbe6',
+                            border: '1px solid #6fdc8c',
+                            color: '#0e6027',
+                            fontSize: '12px',
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, marginBottom: '2px' }}>Respuesta Oficial de Administración (RN-B6)</div>
+                          <div>{ticket.officialResponse}</div>
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          marginTop: '12px',
+                          paddingTop: '10px',
+                          borderTop: '1px solid #e0e0e0',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: '8px',
+                        }}
+                      >
+                        <span className="font-mono" style={{ fontSize: '11px', color: '#525252' }}>
+                          Radicada: {formatDateTimeCO(ticket.createdAt)}
+                        </span>
+                        <button
+                          type="button"
+                          className="cds-btn cds-btn-ghost"
+                          style={{ height: '30px', minHeight: '30px', padding: '0 10px', fontSize: '12px', border: '1px solid #e0e0e0' }}
+                          onClick={() => setHistoryTicket(ticket)}
+                        >
+                          <History size={14} />
+                          <span>Ver historial</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Modal: Historial de Auditoría para el Residente */}
+          {historyTicket && (
+            <div className="cds-modal-overlay">
+              <div className="cds-modal-content" style={{ maxWidth: '580px' }}>
+                <div
+                  style={{
+                    backgroundColor: '#161616',
+                    color: '#ffffff',
+                    padding: '16px 20px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <div style={{ fontSize: '16px', fontWeight: 600 }}>
+                    Trazabilidad — {historyTicket.ticketNumber}
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Cerrar historial"
+                    onClick={() => setHistoryTicket(null)}
+                    style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer' }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div style={{ padding: '20px', maxHeight: '60vh', overflowY: 'auto' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#161616', marginBottom: '12px' }}>
+                    {historyTicket.subject}
+                  </div>
+
+                  {historyLoading ? (
+                    <div style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: '#525252' }}>
+                      Cargando historial...
+                    </div>
+                  ) : historyEntries.length === 0 ? (
+                    <div style={{ padding: '16px', backgroundColor: '#f4f4f4', border: '1px solid #e0e0e0', fontSize: '13px', color: '#525252' }}>
+                      Sin cambios de estado registrados aún. Solicitud radicada el {formatDateTimeCO(historyTicket.createdAt)}.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {historyEntries.map((entry) => (
+                        <div key={entry.id} style={{ padding: '12px', border: '1px solid #e0e0e0', backgroundColor: '#ffffff' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span className={`cds-tag ${PQRS_STATUS_TAG[entry.previousStatus] || 'cds-tag-gray'}`}>
+                                {entry.previousStatus}
+                              </span>
+                              <span style={{ color: '#525252', fontSize: '12px' }}>→</span>
+                              <span className={`cds-tag ${PQRS_STATUS_TAG[entry.newStatus] || 'cds-tag-gray'}`}>
+                                {entry.newStatus}
+                              </span>
+                            </div>
+                            <span className="font-mono" style={{ fontSize: '11px', color: '#525252', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <Clock size={12} />
+                              {formatDateTimeCO(entry.changedAt)}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#161616', marginTop: '8px' }}>
+                            {entry.comment}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ backgroundColor: '#f4f4f4', borderTop: '1px solid #e0e0e0', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end' }}>
+                  <button type="button" className="cds-btn cds-btn-secondary" onClick={() => setHistoryTicket(null)}>
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -42,6 +42,12 @@ import {
   subscribeToApartmentReservations,
   subscribeToAllReservations,
 } from './services/reservationService';
+import {
+  filePqrsTransaction,
+  transitionPqrsStatus,
+  subscribeToApartmentPqrs,
+  subscribeToAllPqrs,
+} from './services/pqrsService';
 import { parseAuthActionParams } from './services/authActionUtils';
 import AuthActionHandler from './components/auth/AuthActionHandler';
 import AuthScreen from './components/auth/AuthScreen';
@@ -69,6 +75,7 @@ export default function App() {
   const [residentAuthorized, setResidentAuthorized] = useState([]);
   const [packages, setPackages] = useState([]);
   const [reservations, setReservations] = useState([]);
+  const [pqrsList, setPqrsList] = useState([]);
 
   const [toastNotification, setToastNotification] = useState(null);
 
@@ -102,6 +109,7 @@ export default function App() {
         setResidentAuthorized([]);
         setPackages([]);
         setReservations([]);
+        setPqrsList([]);
       } else {
         setProfileLoading(true);
       }
@@ -150,12 +158,14 @@ export default function App() {
       unsubscribers.push(subscribeToUsers(db, condoId, setUsers, onSubError('users')));
       unsubscribers.push(subscribeToAllPackages(db, condoId, setPackages, onSubError('packages')));
       unsubscribers.push(subscribeToAllReservations(db, condoId, setReservations, onSubError('reservations')));
+      unsubscribers.push(subscribeToAllPqrs(db, condoId, setPqrsList, onSubError('pqrs')));
     } else if (userProfile.role === 'residente' && userProfile.unitId) {
       const unitId = userProfile.unitId;
       unsubscribers.push(subscribeToApartment(db, condoId, unitId, setResidentApartment, onSubError('apartment')));
       unsubscribers.push(subscribeToAuthorized(db, condoId, unitId, setResidentAuthorized, onSubError('authorized')));
       unsubscribers.push(subscribeToAllApartmentPackages(db, condoId, unitId, setPackages, onSubError('packages')));
       unsubscribers.push(subscribeToApartmentReservations(db, condoId, unitId, setReservations, onSubError('reservations')));
+      unsubscribers.push(subscribeToApartmentPqrs(db, condoId, unitId, setPqrsList, onSubError('pqrs')));
     }
 
     return () => {
@@ -249,6 +259,22 @@ export default function App() {
     showToast('info', 'Reserva rechazada y cupo mensual del apartamento liberado (RN-B3).');
   };
 
+  const handleFilePqrs = async (input) => {
+    const res = await filePqrsTransaction(db, condoId, input);
+    showToast('success', `PQRS radicada con consecutivo ${res.ticketNumber} en Cloud Firestore.`);
+    return res;
+  };
+
+  const handleTransitionPqrs = async (input) => {
+    await transitionPqrsStatus(db, condoId, userProfile.uid, input);
+    showToast(
+      'success',
+      input.newStatus === 'Resuelta'
+        ? 'PQRS resuelta con respuesta oficial e historial inmutable registrado (RN-B6).'
+        : 'PQRS tomada en gestión y registrada en historial de auditoría.',
+    );
+  };
+
   const handleAddAuthorized = async (apartmentId, person) => {
     await addAuthorizedPerson(db, condoId, apartmentId, person);
     showToast('success', `Persona autorizada (${person.fullName}) registrada en Firestore.`);
@@ -323,6 +349,7 @@ export default function App() {
         apartmentsCount={apartments.length}
         packages={packages}
         reservations={reservations}
+        pqrs={pqrsList}
         onLogout={handleLogout}
       />
 
@@ -376,7 +403,9 @@ export default function App() {
             authorizedPeople={residentAuthorized}
             packages={packages}
             reservations={reservations}
+            pqrs={pqrsList}
             onRequestReservation={handleRequestReservation}
+            onFilePqrs={handleFilePqrs}
             onAddAuthorized={handleAddAuthorized}
             onToggleAuthorized={handleToggleAuthorized}
             onRemoveAuthorized={handleRemoveAuthorized}
@@ -394,6 +423,7 @@ export default function App() {
             users={users}
             packages={packages}
             reservations={reservations}
+            pqrs={pqrsList}
             onCreateTower={handleCreateTower}
             onUpdateTower={handleUpdateTower}
             onDeleteTower={handleDeleteTower}
@@ -405,6 +435,7 @@ export default function App() {
             onToggleUserActive={handleToggleUserActive}
             onApproveReservation={handleApproveReservation}
             onRejectReservation={handleRejectReservation}
+            onTransitionPqrs={handleTransitionPqrs}
             onNotify={showToast}
           />
         )}

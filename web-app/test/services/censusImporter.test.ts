@@ -75,6 +75,11 @@ describe.skipIf(!hasEmulator)('importCensusBatch (SCRUM-43 emulator)', () => {
     expect(report.batchesCommitted).toBe(4)
     expect(report.errors[0].reason).toContain('T1-101')
 
+    const t1Snap = await getDoc(doc(adminDb, `${cPath}/towers/T1`))
+    expect(t1Snap.exists()).toBe(true)
+    expect(t1Snap.get('name')).toBe('Torre 1')
+    expect(t1Snap.get('totalApartments')).toBeGreaterThanOrEqual(3)
+
     const t3Snap = await getDoc(doc(adminDb, `${cPath}/towers/T3`))
     expect(t3Snap.exists()).toBe(true)
     const aptSnap = await getDocs(collection(adminDb, `${cPath}/apartments`))

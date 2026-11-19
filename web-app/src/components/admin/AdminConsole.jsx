@@ -16,13 +16,28 @@ import {
   Edit3,
   CheckCircle2,
   XCircle,
+  MessageSquareText,
+  Upload,
+  RefreshCw,
   X,
 } from 'lucide-react';
 import BoardReportModal from './BoardReportModal';
+import AdminPqrsTab from './AdminPqrsTab';
+import CensusImportModal from './CensusImportModal';
 import { db } from '../../config/firebase';
 import { listActiveAuthorized, addAuthorizedPerson, setAuthorizedActive } from '../../services/censusService';
+import {
+  getMonthlyPackageMetrics,
+  getReservationStats,
+  getPqrsResolutionStats,
+} from '../../services/metricsService';
 import { AREA_LABELS } from '../../services/reservationSlots';
 import { formatDateCO, formatTimeCO, getElapsedHours, toDate } from '../../services/dateUtils';
+
+const MONTH_NAMES_ES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+];
 
 export default function AdminConsole({
   condoId,
@@ -33,6 +48,7 @@ export default function AdminConsole({
   users,
   packages,
   reservations,
+  pqrs = [],
   onCreateTower,
   onUpdateTower,
   onDeleteTower,
@@ -44,11 +60,24 @@ export default function AdminConsole({
   onToggleUserActive,
   onApproveReservation,
   onRejectReservation,
+  onTransitionPqrs,
   onNotify,
 }) {
-  const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'census' | 'users' | 'reservations'
+  const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard' | 'census' | 'users' | 'reservations' | 'pqrs'
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  // Monthly Analytics State (SCRUM-39 / RF-18)
+  const [baseYear] = useState(() => new Date().getFullYear());
+  const [metricsMonth, setMetricsMonth] = useState(() => new Date().getMonth() + 1);
+  const [metricsYear, setMetricsYear] = useState(() => new Date().getFullYear());
+  const [monthlyMetrics, setMonthlyMetrics] = useState(null);
+  const [metricsError, setMetricsError] = useState(null);
+  const [metricsRefreshTick, setMetricsRefreshTick] = useState(0);
+  const [loadedMetricsKey, setLoadedMetricsKey] = useState('');
+  const currentMetricsKey = `${condoId}-${metricsYear}-${metricsMonth}-${metricsRefreshTick}-${packages.length}-${reservations.length}-${pqrs.length}`;
+  const metricsLoading = adminTab === 'dashboard' && Boolean(condoId) && loadedMetricsKey !== currentMetricsKey;
 
   // Reservations management state (CON-07)
   const [resStatusFilter, setResStatusFilter] = useState('ALL');
@@ -90,6 +119,34 @@ export default function AdminConsole({
     const timer = setInterval(() => setNowMs(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!condoId || adminTab !== 'dashboard') return undefined;
+    let cancelled = false;
+
+    Promise.all([
+      getMonthlyPackageMetrics(db, condoId, metricsMonth, metricsYear),
+      getReservationStats(db, condoId, metricsMonth, metricsYear),
+      getPqrsResolutionStats(db, condoId, metricsMonth, metricsYear),
+    ])
+      .then(([pkgStats, resStats, pqrsStats]) => {
+        if (!cancelled) {
+          setMetricsError(null);
+          setMonthlyMetrics({ packages: pkgStats, reservations: resStats, pqrs: pqrsStats });
+          setLoadedMetricsKey(currentMetricsKey);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setMetricsError(err?.message || 'No se pudieron consultar las métricas mensuales en Firestore.');
+          setLoadedMetricsKey(currentMetricsKey);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [condoId, adminTab, metricsMonth, metricsYear, currentMetricsKey]);
 
   const effectiveAptTowerId =
     aptTowerId && towers.some((t) => t.id === aptTowerId) ? aptTowerId : towers[0]?.id || '';
@@ -280,6 +337,7 @@ export default function AdminConsole({
             { id: 'census', label: `Censo (${apartments.length} Aptos)`, icon: Building },
             { id: 'users', label: `Usuarios y Roles (${users.length})`, icon: UserCog },
             { id: 'reservations', label: 'Reservas', icon: CalendarCheck, badge: reservations.filter((r) => r.status === 'Pendiente').length },
+            { id: 'pqrs', label: 'PQRS', icon: MessageSquareText, badge: pqrs.filter((p) => p.status !== 'Resuelta').length },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = adminTab === tab.id;
@@ -338,26 +396,76 @@ export default function AdminConsole({
           }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: '14px', color: '#161616' }}>
-                Indicadores Operativos en Tiempo Real
+                Indicadores Operativos y Analítica Mensual (RF-18)
               </div>
               <div style={{ fontSize: '12px', color: '#525252' }}>
-                Cálculos directos sobre colecciones activas en Cloud Firestore.
+                Consultas agregadas en Cloud Firestore para el período {MONTH_NAMES_ES[metricsMonth - 1]} {metricsYear}.
               </div>
             </div>
 
-            <button
-              type="button"
-              className="cds-btn cds-btn-primary"
-              style={{ height: '36px', minHeight: '36px', fontSize: '12px' }}
-              onClick={() => setIsReportModalOpen(true)}
-            >
-              <Printer size={15} />
-              <span>Imprimir Resumen Ejecutivo</span>
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <select
+                aria-label="Mes del reporte"
+                className="cds-select"
+                style={{ width: '138px', height: '36px', fontSize: '13px' }}
+                value={metricsMonth}
+                onChange={(e) => setMetricsMonth(Number(e.target.value))}
+              >
+                {MONTH_NAMES_ES.map((label, idx) => (
+                  <option key={label} value={idx + 1}>{label}</option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Año del reporte"
+                className="cds-select font-mono"
+                style={{ width: '92px', height: '36px', fontSize: '13px' }}
+                value={metricsYear}
+                onChange={(e) => setMetricsYear(Number(e.target.value))}
+              >
+                {[baseYear - 1, baseYear, baseYear + 1].map((yr) => (
+                  <option key={yr} value={yr}>{yr}</option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className="cds-btn cds-btn-secondary"
+                style={{ height: '36px', minHeight: '36px', fontSize: '12px', padding: '0 12px' }}
+                disabled={metricsLoading}
+                onClick={() => setMetricsRefreshTick((t) => t + 1)}
+              >
+                <RefreshCw size={14} />
+                <span>{metricsLoading ? 'Consultando...' : 'Actualizar'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="cds-btn cds-btn-primary"
+                style={{ height: '36px', minHeight: '36px', fontSize: '12px' }}
+                onClick={() => setIsReportModalOpen(true)}
+              >
+                <Printer size={15} />
+                <span>Imprimir Resumen Ejecutivo</span>
+              </button>
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '4px solid #0f62fe' }}>
+          {metricsError && (
+            <div style={{
+              padding: '10px 14px',
+              marginBottom: '16px',
+              backgroundColor: '#fff1f1',
+              border: '1px solid #ffb3b8',
+              color: '#a2191f',
+              fontSize: '12px',
+            }}>
+              {metricsError}
+            </div>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #0f62fe' }}>
               <div style={{ fontSize: '11px', color: '#525252', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)' }}>
                 Estructura Activa
               </div>
@@ -369,32 +477,55 @@ export default function AdminConsole({
               </div>
             </div>
 
-            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '4px solid #24a148' }}>
+            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #24a148' }}>
               <div style={{ fontSize: '11px', color: '#525252', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)' }}>
-                Flujo de Paquetería
+                Paquetería ({MONTH_NAMES_ES[metricsMonth - 1].slice(0, 3)} {metricsYear})
               </div>
               <div style={{ fontSize: '32px', fontWeight: 600, color: '#161616', margin: '8px 0 4px', fontFamily: 'var(--cds-font-mono)' }}>
-                {totalPackages}
+                {monthlyMetrics ? monthlyMetrics.packages.receivedCount : totalPackages}
               </div>
               <div style={{ fontSize: '12px', color: '#0e6027', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <TrendingUp size={14} />
-                <span>{deliveredPackages.length} entregados ({deliveryRate}%)</span>
+                <span>
+                  {monthlyMetrics
+                    ? `${monthlyMetrics.packages.deliveredCount} entregados • ${monthlyMetrics.packages.averagePickupHours}h retiro`
+                    : `${deliveredPackages.length} entregados (${deliveryRate}%) • ${avgPickupHours}h`}
+                </span>
               </div>
             </div>
 
-            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '4px solid #0043ce' }}>
+            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #8a3ffc' }}>
               <div style={{ fontSize: '11px', color: '#525252', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)' }}>
-                Tiempo Medio Retiro
+                Reservas del Mes
               </div>
-              <div style={{ fontSize: '32px', fontWeight: 600, color: '#0043ce', margin: '8px 0 4px', fontFamily: 'var(--cds-font-mono)' }}>
-                {avgPickupHours} <span style={{ fontSize: '16px', fontWeight: 400 }}>hrs</span>
+              <div style={{ fontSize: '32px', fontWeight: 600, color: '#161616', margin: '8px 0 4px', fontFamily: 'var(--cds-font-mono)' }}>
+                {monthlyMetrics ? monthlyMetrics.reservations.total : reservations.length}
               </div>
               <div style={{ fontSize: '12px', color: '#525252' }}>
-                Desde llegada en portería hasta entrega
+                {monthlyMetrics
+                  ? `Salón: ${monthlyMetrics.reservations.byArea.salon_social} • BBQ: ${monthlyMetrics.reservations.byArea.bbq}`
+                  : `${reservations.filter((r) => r.status === 'Aprobada').length} aprobadas`}
               </div>
             </div>
 
-            <div className="cds-tile" style={{ backgroundColor: overduePackages.length > 0 ? '#fff1f1' : '#ffffff', borderTop: '4px solid #da1e28' }}>
+            <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #0043ce' }}>
+              <div style={{ fontSize: '11px', color: '#525252', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)' }}>
+                Resolución PQRS (RN-B6)
+              </div>
+              <div style={{ fontSize: '32px', fontWeight: 600, color: '#0043ce', margin: '8px 0 4px', fontFamily: 'var(--cds-font-mono)' }}>
+                {monthlyMetrics ? monthlyMetrics.pqrs.byStatus.Resuelta : pqrs.filter((p) => p.status === 'Resuelta').length}
+                <span style={{ fontSize: '16px', fontWeight: 400, color: '#525252' }}>
+                  /{monthlyMetrics ? monthlyMetrics.pqrs.total : pqrs.length}
+                </span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#525252' }}>
+                {monthlyMetrics
+                  ? `Promedio resolución: ${monthlyMetrics.pqrs.averageResolutionHours} hrs`
+                  : `${pqrs.filter((p) => p.status !== 'Resuelta').length} abiertas actualmente`}
+              </div>
+            </div>
+
+            <div className="cds-tile" style={{ backgroundColor: overduePackages.length > 0 ? '#fff1f1' : '#ffffff', borderTop: '3px solid #da1e28' }}>
               <div style={{ fontSize: '11px', color: '#a2191f', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)', fontWeight: 600 }}>
                 Alerta Bodegaje &gt;15D (RN-B5)
               </div>
@@ -460,9 +591,39 @@ export default function AdminConsole({
         </div>
       )}
 
-      {/* TAB 2: CENSO REAL (CRUD TORRES Y APARTAMENTOS - CON-02) */}
+      {/* TAB 2: CENSO REAL (CRUD TORRES Y APARTAMENTOS - CON-02 + IMPORTACIÓN MASIVA RF-04) */}
       {adminTab === 'census' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Bulk Import Action Bar */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+            backgroundColor: '#ffffff',
+            border: '1px solid #e0e0e0',
+            padding: '12px 16px',
+          }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '14px', color: '#161616' }}>
+                Importación Masiva de Censo (CSV / Excel — RF-04)
+              </div>
+              <div style={{ fontSize: '12px', color: '#525252' }}>
+                Cargue torres y apartamentos en lotes atómicos de hasta 400 operaciones con validación fila por fila.
+              </div>
+            </div>
+            <button
+              type="button"
+              className="cds-btn cds-btn-primary"
+              style={{ height: '36px', minHeight: '36px', fontSize: '12px' }}
+              onClick={() => setIsImportModalOpen(true)}
+            >
+              <Upload size={15} />
+              <span>Importar Censo CSV</span>
+            </button>
+          </div>
+
           {/* Forms Row: Create Tower + Create Apartment */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
             {/* Create Tower */}
@@ -1090,17 +1251,17 @@ export default function AdminConsole({
 
             {/* KPI Strip */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
-              <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderLeft: '4px solid #f1c21b' }}>
+              <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #f1c21b' }}>
                 <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', color: '#525252' }}>PENDIENTES POR RESOLVER</div>
-                <div style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>{pendingCount}</div>
+                <div className="font-mono" style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>{pendingCount}</div>
               </div>
-              <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderLeft: '4px solid #24a148' }}>
+              <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #24a148' }}>
                 <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', color: '#525252' }}>APROBADAS (FRANJA BLOQUEADA)</div>
-                <div style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>{approvedCount}</div>
+                <div className="font-mono" style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>{approvedCount}</div>
               </div>
-              <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderLeft: '4px solid #da1e28' }}>
+              <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #da1e28' }}>
                 <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', color: '#525252' }}>RECHAZADAS (CUPO LIBERADO)</div>
-                <div style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>{rejectedCount}</div>
+                <div className="font-mono" style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>{rejectedCount}</div>
               </div>
             </div>
 
@@ -1346,6 +1507,23 @@ export default function AdminConsole({
         </div>
       )}
 
+      {/* TAB 5: PQRS (CON-08 / CON-09 / RN-B6) */}
+      {adminTab === 'pqrs' && (
+        <AdminPqrsTab
+          condoId={condoId}
+          pqrs={pqrs}
+          onTransitionPqrs={onTransitionPqrs}
+          onNotify={onNotify}
+        />
+      )}
+
+      <CensusImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        condoId={condoId}
+        onNotify={onNotify}
+      />
+
       <BoardReportModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
@@ -1355,6 +1533,9 @@ export default function AdminConsole({
         apartments={apartments}
         packages={packages}
         reservations={reservations}
+        pqrs={pqrs}
+        monthlyMetrics={monthlyMetrics}
+        metricsPeriodLabel={`${MONTH_NAMES_ES[metricsMonth - 1]} ${metricsYear}`}
         nowMs={nowMs}
       />
     </div>

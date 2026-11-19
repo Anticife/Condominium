@@ -351,7 +351,40 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Monospace Utilities */
+/* Monospace Utilities & Tabular Numerals */
 .font-mono {
   font-family: var(--cds-font-mono) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.cds-table {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background-color: #0f62fe;
+  color: #ffffff;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .cds-print-report,
+  .cds-print-report * {
+    visibility: visible;
+  }
+  .cds-print-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: 100% !important;
+    max-height: none !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .cds-no-print {
+    display: none !important;
+  }
 }

@@ -11,13 +11,19 @@ export default function BoardReportModal({
   apartments,
   packages,
   reservations,
+  pqrs = [],
+  monthlyMetrics = null,
+  metricsPeriodLabel = '',
   nowMs,
 }) {
   if (!isOpen) return null;
 
-  const totalPackages = packages.length;
+  const totalPackages = monthlyMetrics ? monthlyMetrics.packages.receivedCount : packages.length;
   const pendingPackages = packages.filter((p) => p.status === 'Pendiente');
-  const deliveredPackages = packages.filter((p) => p.status === 'Entregado');
+  const deliveredCount = monthlyMetrics
+    ? monthlyMetrics.packages.deliveredCount
+    : packages.filter((p) => p.status === 'Entregado').length;
+  const avgPickupHours = monthlyMetrics ? monthlyMetrics.packages.averagePickupHours : null;
 
   const overduePackages = pendingPackages.filter((p) => getElapsedHours(p.receivedAt, nowMs) >= 15 * 24);
 
@@ -26,9 +32,40 @@ export default function BoardReportModal({
     return acc + (days - 15) * 5000;
   }, 0);
 
-  const totalReservations = reservations.length;
-  const approvedReservations = reservations.filter((r) => r.status === 'Aprobada');
-  const rejectedReservations = reservations.filter((r) => r.status === 'Rechazada');
+  const totalReservations = monthlyMetrics ? monthlyMetrics.reservations.total : reservations.length;
+  const approvedReservationsCount = monthlyMetrics
+    ? monthlyMetrics.reservations.byStatus.Aprobada
+    : reservations.filter((r) => r.status === 'Aprobada').length;
+  const rejectedReservationsCount = monthlyMetrics
+    ? monthlyMetrics.reservations.byStatus.Rechazada
+    : reservations.filter((r) => r.status === 'Rechazada').length;
+  const salonCount = monthlyMetrics
+    ? monthlyMetrics.reservations.byArea.salon_social
+    : reservations.filter((r) => r.commonArea === 'salon_social').length;
+  const bbqCount = monthlyMetrics
+    ? monthlyMetrics.reservations.byArea.bbq
+    : reservations.filter((r) => r.commonArea === 'bbq').length;
+
+  const pqrsTotal = monthlyMetrics ? monthlyMetrics.pqrs.total : pqrs.length;
+  const pqrsResolved = monthlyMetrics
+    ? monthlyMetrics.pqrs.byStatus.Resuelta
+    : pqrs.filter((p) => p.status === 'Resuelta').length;
+  const pqrsInProgress = monthlyMetrics
+    ? monthlyMetrics.pqrs.byStatus['En gestión']
+    : pqrs.filter((p) => p.status === 'En gestión').length;
+  const pqrsFiled = monthlyMetrics
+    ? monthlyMetrics.pqrs.byStatus.Radicada
+    : pqrs.filter((p) => p.status === 'Radicada').length;
+  const pqrsAvgHours = monthlyMetrics ? monthlyMetrics.pqrs.averageResolutionHours : 0;
+  const pqrsByCategory = monthlyMetrics
+    ? monthlyMetrics.pqrs.byCategory
+    : {
+        Peticion: pqrs.filter((p) => p.category === 'Peticion').length,
+        Queja: pqrs.filter((p) => p.category === 'Queja').length,
+        Reclamo: pqrs.filter((p) => p.category === 'Reclamo').length,
+        Sugerencia: pqrs.filter((p) => p.category === 'Sugerencia').length,
+      };
+  const pqrsResolutionRate = pqrsTotal > 0 ? Math.round((pqrsResolved / pqrsTotal) * 100) : 0;
 
   const currentDateStr = formatDateCO(new Date(nowMs));
 
@@ -44,10 +81,10 @@ export default function BoardReportModal({
       padding: '20px',
       fontFamily: 'var(--cds-font-sans)',
     }}>
-      <div style={{
+      <div className="cds-print-report" style={{
         backgroundColor: '#ffffff',
         width: '100%',
-        maxWidth: '850px',
+        maxWidth: '880px',
         maxHeight: '90vh',
         border: '1px solid #161616',
         boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
@@ -55,7 +92,7 @@ export default function BoardReportModal({
         flexDirection: 'column',
         overflow: 'hidden',
       }}>
-        <div style={{
+        <div className="cds-no-print" style={{
           backgroundColor: '#161616',
           color: '#ffffff',
           padding: '12px 20px',
@@ -103,7 +140,9 @@ export default function BoardReportModal({
                 </div>
               </div>
               <div style={{ textAlign: 'right', fontFamily: 'var(--cds-font-mono)' }}>
-                <div style={{ fontSize: '10px', color: '#0f62fe', fontWeight: 600 }}>INFORME OPERATIVO</div>
+                <div style={{ fontSize: '10px', color: '#0f62fe', fontWeight: 600 }}>
+                  INFORME OPERATIVO {metricsPeriodLabel ? `// ${metricsPeriodLabel.toUpperCase()}` : ''}
+                </div>
                 <div style={{ fontSize: '12px', color: '#161616', marginTop: '2px' }}>Fecha: {currentDateStr}</div>
               </div>
             </div>
@@ -113,30 +152,40 @@ export default function BoardReportModal({
             <h2 style={{ fontSize: '14px', fontWeight: 600, color: '#161616', marginBottom: '12px', textTransform: 'uppercase' }}>
               1. Resumen Consolidado de Operación
             </h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-              <div style={{ padding: '12px', backgroundColor: '#f4f4f4', borderLeft: '3px solid #0f62fe' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+              <div style={{ padding: '12px', backgroundColor: '#f4f4f4', border: '1px solid #e0e0e0' }}>
                 <div style={{ fontSize: '11px', color: '#525252' }}>Censo Registrado</div>
-                <div style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>
+                <div className="font-mono" style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>
                   {apartments.length} Unidades
                 </div>
-                <div style={{ fontSize: '10px', color: '#8d8d8d' }}>
+                <div style={{ fontSize: '11px', color: '#525252' }}>
                   Distribuidas en {towers.length} {towers.length === 1 ? 'torre' : 'torres'}
                 </div>
               </div>
 
-              <div style={{ padding: '12px', backgroundColor: '#f4f4f4', borderLeft: '3px solid #24a148' }}>
-                <div style={{ fontSize: '11px', color: '#525252' }}>Paquetería Gestionada</div>
-                <div style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>{totalPackages} Envíos</div>
-                <div style={{ fontSize: '10px', color: '#8d8d8d' }}>
-                  {deliveredPackages.length} entregados ({totalPackages > 0 ? Math.round((deliveredPackages.length / totalPackages) * 100) : 0}%)
+              <div style={{ padding: '12px', backgroundColor: '#f4f4f4', border: '1px solid #e0e0e0' }}>
+                <div style={{ fontSize: '11px', color: '#525252' }}>Paquetería del Período</div>
+                <div className="font-mono" style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>{totalPackages} Envíos</div>
+                <div style={{ fontSize: '11px', color: '#525252' }}>
+                  {deliveredCount} entregados{avgPickupHours !== null ? ` • ${avgPickupHours}h prom.` : ''}
                 </div>
               </div>
 
-              <div style={{ padding: '12px', backgroundColor: '#f4f4f4', borderLeft: '3px solid #8a3ffc' }}>
+              <div style={{ padding: '12px', backgroundColor: '#f4f4f4', border: '1px solid #e0e0e0' }}>
                 <div style={{ fontSize: '11px', color: '#525252' }}>Reservas de Áreas</div>
-                <div style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>{totalReservations} Solicitudes</div>
-                <div style={{ fontSize: '10px', color: '#8d8d8d' }}>
-                  {approvedReservations.length} aprobadas • {rejectedReservations.length} rechazadas
+                <div className="font-mono" style={{ fontSize: '20px', fontWeight: 600, color: '#161616' }}>{totalReservations} Solicitudes</div>
+                <div style={{ fontSize: '11px', color: '#525252' }}>
+                  {approvedReservationsCount} aprob. • {rejectedReservationsCount} rech. (Salón: {salonCount}, BBQ: {bbqCount})
+                </div>
+              </div>
+
+              <div style={{ padding: '12px', backgroundColor: '#f4f4f4', border: '1px solid #e0e0e0' }}>
+                <div style={{ fontSize: '11px', color: '#525252' }}>PQRS Resueltas (RN-B6)</div>
+                <div className="font-mono" style={{ fontSize: '20px', fontWeight: 600, color: '#0043ce' }}>
+                  {pqrsResolved}/{pqrsTotal} ({pqrsResolutionRate}%)
+                </div>
+                <div style={{ fontSize: '11px', color: '#525252' }}>
+                  Promedio resolución: {pqrsAvgHours} hrs
                 </div>
               </div>
             </div>
@@ -191,6 +240,38 @@ export default function BoardReportModal({
                 </tbody>
               </table>
             )}
+          </div>
+
+          <div style={{ marginBottom: '24px' }}>
+            <h2 style={{ fontSize: '14px', fontWeight: 600, color: '#161616', marginBottom: '10px', textTransform: 'uppercase' }}>
+              3. Gestión y Resolución de PQRS (RN-B6)
+            </h2>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f4f4f4', borderBottom: '1px solid #161616', textAlign: 'left' }}>
+                  <th style={{ padding: '8px' }}>Radicadas</th>
+                  <th style={{ padding: '8px' }}>En gestión</th>
+                  <th style={{ padding: '8px' }}>Resueltas</th>
+                  <th style={{ padding: '8px' }}>Peticiones</th>
+                  <th style={{ padding: '8px' }}>Quejas</th>
+                  <th style={{ padding: '8px' }}>Reclamos</th>
+                  <th style={{ padding: '8px' }}>Sugerencias</th>
+                  <th style={{ padding: '8px' }}>Tiempo Prom.</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderBottom: '1px solid #e0e0e0' }} className="font-mono">
+                  <td style={{ padding: '8px' }}>{pqrsFiled}</td>
+                  <td style={{ padding: '8px' }}>{pqrsInProgress}</td>
+                  <td style={{ padding: '8px', color: '#0e6027', fontWeight: 600 }}>{pqrsResolved}</td>
+                  <td style={{ padding: '8px' }}>{pqrsByCategory.Peticion}</td>
+                  <td style={{ padding: '8px' }}>{pqrsByCategory.Queja}</td>
+                  <td style={{ padding: '8px' }}>{pqrsByCategory.Reclamo}</td>
+                  <td style={{ padding: '8px' }}>{pqrsByCategory.Sugerencia}</td>
+                  <td style={{ padding: '8px', fontWeight: 600 }}>{pqrsAvgHours} hrs</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           <div style={{ marginTop: '36px', paddingTop: '20px', borderTop: '1px solid #8d8d8d' }}>

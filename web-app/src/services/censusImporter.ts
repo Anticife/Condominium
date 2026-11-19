@@ -245,41 +245,35 @@ export async function importCensusBatch(
     }
   }
 
-  // Consultar apartamentos existentes en este conjunto para detectar duplicados sin abortar.
-  const existingSnap = await getDocs(collection(db, 'condominiums', condoId, 'apartments'))
-  const existingIds = new Set(existingSnap.docs.map((d) => d.id))
-
-  const towerCounts = new Map<string, number>()
-  for (const row of rows) {
-    towerCounts.set(row.towerId, (towerCounts.get(row.towerId) ?? 0) + 1)
+  // Consultar torres y apartamentos existentes en este conjunto para preservar nombres/capacidad
+  // y detectar duplicados sin abortar el resto de la carga.
+  const [existingTowersSnap, existingSnap] = await Promise.all([
+    getDocs(collection(db, 'condominiums', condoId, 'towers')),
+    getDocs(collection(db, 'condominiums', condoId, 'apartments')),
+  ])
+  const existingTowers = new Map<string, { name?: string; totalApartments?: number }>()
+  for (const d of existingTowersSnap.docs) {
+    const data = d.data() as { name?: string; totalApartments?: number }
+    existingTowers.set(d.id, data)
   }
 
-  let batchesCommitted = 0
-
-  // Fase 1: torres del conjunto.
-  const towerEntries = Array.from(towerCounts.entries())
-  for (const chunk of chunkArray(towerEntries, chunkSize)) {
-    const batch = writeBatch(db)
-    for (const [towerId, count] of chunk) {
-      batch.set(
-        doc(db, 'condominiums', condoId, 'towers', towerId),
-        {
-          id: towerId,
-          name: towerId.startsWith('T') && /^T\d+$/.test(towerId) ? `Torre ${towerId.slice(1)}` : `Torre ${towerId}`,
-          totalApartments: count,
-        },
-        { merge: true },
-      )
+  const existingIds = new Set<string>()
+  const existingCountByTower = new Map<string, number>()
+  for (const d of existingSnap.docs) {
+    existingIds.add(d.id)
+    const tId = (d.data() as { towerId?: string }).towerId
+    if (tId) {
+      existingCountByTower.set(tId, (existingCountByTower.get(tId) ?? 0) + 1)
     }
-    await batch.commit()
-    batchesCommitted += 1
   }
 
-  // Fase 2: apartamentos nuevos en chunks de <= 400.
   const errors: CensusRowError[] = []
   const toCreate: CensusRow[] = []
+  const newCountByTower = new Map<string, number>()
+  const touchedTowers = new Set<string>()
 
   for (const row of rows) {
+    touchedTowers.add(row.towerId)
     if (existingIds.has(row.apartmentId)) {
       errors.push({
         rowNumber: row.rowNumber,
@@ -289,8 +283,44 @@ export async function importCensusBatch(
       continue
     }
     toCreate.push(row)
+    newCountByTower.set(row.towerId, (newCountByTower.get(row.towerId) ?? 0) + 1)
   }
 
+  let batchesCommitted = 0
+
+  // Fase 1: torres del conjunto (preservando nombre y sin reducir capacidad en torres existentes).
+  const towerIds = Array.from(touchedTowers)
+  for (const chunk of chunkArray(towerIds, chunkSize)) {
+    const batch = writeBatch(db)
+    for (const towerId of chunk) {
+      const existing = existingTowers.get(towerId)
+      const defaultName =
+        towerId.startsWith('T') && /^T\d+$/.test(towerId)
+          ? `Torre ${towerId.slice(1)}`
+          : `Torre ${towerId}`
+      const totalAfterImport =
+        (existingCountByTower.get(towerId) ?? 0) + (newCountByTower.get(towerId) ?? 0)
+      const totalApartments = Math.max(
+        existing?.totalApartments ?? 0,
+        totalAfterImport,
+        1,
+      )
+
+      batch.set(
+        doc(db, 'condominiums', condoId, 'towers', towerId),
+        {
+          id: towerId,
+          name: existing?.name?.trim() ? existing.name : defaultName,
+          totalApartments,
+        },
+        { merge: true },
+      )
+    }
+    await batch.commit()
+    batchesCommitted += 1
+  }
+
+  // Fase 2: apartamentos nuevos en chunks de <= 400.
   for (const chunk of chunkArray(toCreate, chunkSize)) {
     const batch = writeBatch(db)
     for (const row of chunk) {
@@ -308,7 +338,7 @@ export async function importCensusBatch(
   }
 
   return {
-    towersProcessed: towerEntries.length,
+    towersProcessed: towerIds.length,
     apartmentsCreated: toCreate.length,
     batchesCommitted,
     skippedDuplicates: errors.length,

@@ -8,6 +8,7 @@ import {
   Activity,
   Package,
   CalendarDays,
+  MessageSquareText,
   LogOut,
 } from 'lucide-react';
 import { getElapsedHours } from '../../services/dateUtils';
@@ -25,6 +26,7 @@ export default function CarbonMasthead({
   apartmentsCount,
   packages,
   reservations,
+  pqrs = [],
   onLogout,
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -47,6 +49,7 @@ export default function CarbonMasthead({
     return getElapsedHours(p.receivedAt, nowMs) >= 15 * 24;
   }).length;
   const pendingReservationsCount = reservations.filter((r) => r.status === 'Pendiente').length;
+  const openPqrsCount = pqrs.filter((p) => p.status !== 'Resuelta').length;
 
   const roleInfo = ROLE_META[userProfile?.role] || ROLE_META.residente;
   const RoleIcon = roleInfo.icon;
@@ -187,6 +190,20 @@ export default function CarbonMasthead({
                 color: pendingReservationsCount > 0 ? '#f1c21b' : '#8d8d8d',
               }}>
                 {pendingReservationsCount} por resolver
+              </span>
+            </div>
+          )}
+
+          {userProfile?.role !== 'portero' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+              <MessageSquareText size={16} color="#d4bbff" />
+              <span style={{ color: '#c6c6c6' }}>PQRS:</span>
+              <span style={{
+                fontFamily: 'var(--cds-font-mono)',
+                fontWeight: 600,
+                color: openPqrsCount > 0 ? '#d4bbff' : '#8d8d8d',
+              }}>
+                {openPqrsCount} {openPqrsCount === 1 ? 'abierta' : 'abiertas'}
               </span>
             </div>
           )}
