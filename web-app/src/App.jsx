@@ -49,6 +49,17 @@ import {
   subscribeToAllPqrs,
 } from './services/pqrsService';
 import { parseAuthActionParams } from './services/authActionUtils';
+import {
+  registerPwaServiceWorker,
+  getNotificationPermission,
+  requestNotificationPermission,
+  showLocalNotification,
+  detectPackageNotifications,
+  detectPqrsNotifications,
+  detectReservationNotifications,
+  detectNewUsersNotifications,
+  detectOwnProfileNotifications,
+} from './services/pwaNotificationService';
 import AuthActionHandler from './components/auth/AuthActionHandler';
 import AuthScreen from './components/auth/AuthScreen';
 import CondominiumOnboarding from './components/auth/CondominiumOnboarding';
@@ -78,10 +89,51 @@ export default function App() {
   const [pqrsList, setPqrsList] = useState([]);
 
   const [toastNotification, setToastNotification] = useState(null);
+  const [notificationPermission, setNotificationPermission] = useState(() => getNotificationPermission());
 
   const showToast = useCallback((type, message) => {
     setToastNotification({ type, message });
     setTimeout(() => setToastNotification(null), 6000);
+  }, []);
+
+  const dispatchRealtimeAlerts = useCallback(
+    (alerts) => {
+      if (!alerts || alerts.length === 0) return;
+      alerts.forEach((alert) => {
+        showLocalNotification(alert);
+      });
+      const latest = alerts[alerts.length - 1];
+      showToast('info', `${latest.title}: ${latest.body}`);
+    },
+    [showToast],
+  );
+
+  const handleEnableNotifications = useCallback(async () => {
+    if (notificationPermission === 'granted') {
+      showToast('info', 'Las alertas en tiempo real ya están activas en este dispositivo.');
+      return;
+    }
+    if (notificationPermission === 'denied') {
+      showToast('error', 'Las notificaciones están bloqueadas en el navegador. Habilítalas en los ajustes del sitio.');
+      return;
+    }
+    const result = await requestNotificationPermission();
+    setNotificationPermission(result);
+    if (result === 'granted') {
+      showToast('success', 'Alertas en tiempo real activadas para esta app.');
+      showLocalNotification({
+        title: 'Mi Conjunto en Línea',
+        body: 'Recibirás alertas cuando haya nuevos paquetes, PQRS o reservas.',
+        tag: 'pwa-welcome',
+      });
+    } else if (result === 'denied') {
+      showToast('info', 'No se activaron las alertas del sistema; seguirás viendo avisos dentro de la app.');
+    }
+  }, [notificationPermission, showToast]);
+
+  // Register lightweight PWA Service Worker on mount
+  useEffect(() => {
+    registerPwaServiceWorker();
   }, []);
 
   // Dynamic page title per tenant
@@ -120,10 +172,15 @@ export default function App() {
   // 2. Real-time Firestore profile listener for authenticated user
   useEffect(() => {
     if (!authUser?.uid) return undefined;
+    let prevProfile = null;
     const unsub = subscribeToOwnProfile(
       db,
       authUser.uid,
       (profile) => {
+        if (prevProfile) {
+          dispatchRealtimeAlerts(detectOwnProfileNotifications(prevProfile, profile));
+        }
+        prevProfile = profile;
         setUserProfile(profile);
         setProfileLoading(false);
       },
@@ -133,7 +190,7 @@ export default function App() {
       },
     );
     return () => unsub();
-  }, [authUser?.uid, showToast]);
+  }, [authUser?.uid, dispatchRealtimeAlerts, showToast]);
 
   // 3. Tenant-scoped + role-scoped Firestore subscriptions (strictly compliant with firestore.rules)
   useEffect(() => {
@@ -141,31 +198,70 @@ export default function App() {
       return undefined;
     }
     const condoId = userProfile.condominiumId;
+    const role = userProfile.role;
+    const currentUid = userProfile.uid;
     const unsubscribers = [];
     const onSubError = (scope) => (err) => {
       console.error(`Firestore subscription error (${scope}):`, err);
     };
 
+    let prevPackages = null;
+    let prevReservations = null;
+    let prevPqrs = null;
+    let prevUsers = null;
+
+    const handlePackagesSnapshot = (items) => {
+      if (prevPackages !== null) {
+        dispatchRealtimeAlerts(detectPackageNotifications(prevPackages, items, role, currentUid));
+      }
+      prevPackages = items;
+      setPackages(items);
+    };
+
+    const handleReservationsSnapshot = (items) => {
+      if (prevReservations !== null) {
+        dispatchRealtimeAlerts(detectReservationNotifications(prevReservations, items, role, currentUid));
+      }
+      prevReservations = items;
+      setReservations(items);
+    };
+
+    const handlePqrsSnapshot = (items) => {
+      if (prevPqrs !== null) {
+        dispatchRealtimeAlerts(detectPqrsNotifications(prevPqrs, items, role, currentUid));
+      }
+      prevPqrs = items;
+      setPqrsList(items);
+    };
+
+    const handleUsersSnapshot = (items) => {
+      if (prevUsers !== null) {
+        dispatchRealtimeAlerts(detectNewUsersNotifications(prevUsers, items, currentUid));
+      }
+      prevUsers = items;
+      setUsers(items);
+    };
+
     unsubscribers.push(subscribeToCondominium(db, condoId, setCondominium, onSubError('condominium')));
 
-    if (userProfile.role === 'portero') {
+    if (role === 'portero') {
       unsubscribers.push(subscribeToTowers(db, condoId, setTowers, onSubError('towers')));
       unsubscribers.push(subscribeToAllApartments(db, condoId, setApartments, onSubError('apartments')));
-      unsubscribers.push(subscribeToPendingPackages(db, condoId, setPackages, onSubError('packages')));
-    } else if (userProfile.role === 'administradora') {
+      unsubscribers.push(subscribeToPendingPackages(db, condoId, handlePackagesSnapshot, onSubError('packages')));
+    } else if (role === 'administradora') {
       unsubscribers.push(subscribeToTowers(db, condoId, setTowers, onSubError('towers')));
       unsubscribers.push(subscribeToAllApartments(db, condoId, setApartments, onSubError('apartments')));
-      unsubscribers.push(subscribeToUsers(db, condoId, setUsers, onSubError('users')));
-      unsubscribers.push(subscribeToAllPackages(db, condoId, setPackages, onSubError('packages')));
-      unsubscribers.push(subscribeToAllReservations(db, condoId, setReservations, onSubError('reservations')));
-      unsubscribers.push(subscribeToAllPqrs(db, condoId, setPqrsList, onSubError('pqrs')));
-    } else if (userProfile.role === 'residente' && userProfile.unitId) {
+      unsubscribers.push(subscribeToUsers(db, condoId, handleUsersSnapshot, onSubError('users')));
+      unsubscribers.push(subscribeToAllPackages(db, condoId, handlePackagesSnapshot, onSubError('packages')));
+      unsubscribers.push(subscribeToAllReservations(db, condoId, handleReservationsSnapshot, onSubError('reservations')));
+      unsubscribers.push(subscribeToAllPqrs(db, condoId, handlePqrsSnapshot, onSubError('pqrs')));
+    } else if (role === 'residente' && userProfile.unitId) {
       const unitId = userProfile.unitId;
       unsubscribers.push(subscribeToApartment(db, condoId, unitId, setResidentApartment, onSubError('apartment')));
       unsubscribers.push(subscribeToAuthorized(db, condoId, unitId, setResidentAuthorized, onSubError('authorized')));
-      unsubscribers.push(subscribeToAllApartmentPackages(db, condoId, unitId, setPackages, onSubError('packages')));
-      unsubscribers.push(subscribeToApartmentReservations(db, condoId, unitId, setReservations, onSubError('reservations')));
-      unsubscribers.push(subscribeToApartmentPqrs(db, condoId, unitId, setPqrsList, onSubError('pqrs')));
+      unsubscribers.push(subscribeToAllApartmentPackages(db, condoId, unitId, handlePackagesSnapshot, onSubError('packages')));
+      unsubscribers.push(subscribeToApartmentReservations(db, condoId, unitId, handleReservationsSnapshot, onSubError('reservations')));
+      unsubscribers.push(subscribeToApartmentPqrs(db, condoId, unitId, handlePqrsSnapshot, onSubError('pqrs')));
     }
 
     return () => {
@@ -177,7 +273,7 @@ export default function App() {
         }
       });
     };
-  }, [userProfile]);
+  }, [userProfile, dispatchRealtimeAlerts]);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -350,6 +446,8 @@ export default function App() {
         packages={packages}
         reservations={reservations}
         pqrs={pqrsList}
+        notificationPermission={notificationPermission}
+        onEnableNotifications={handleEnableNotifications}
         onLogout={handleLogout}
       />
 

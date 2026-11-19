@@ -10,6 +10,8 @@ import {
   CalendarDays,
   MessageSquareText,
   LogOut,
+  Bell,
+  BellOff,
 } from 'lucide-react';
 import { getElapsedHours } from '../../services/dateUtils';
 
@@ -27,6 +29,8 @@ export default function CarbonMasthead({
   packages,
   reservations,
   pqrs = [],
+  notificationPermission = 'unsupported',
+  onEnableNotifications,
   onLogout,
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -208,6 +212,40 @@ export default function CarbonMasthead({
                 {userProfile?.unitId ? `Apto ${userProfile.unitId}` : userProfile?.email}
               </div>
             </div>
+            {notificationPermission !== 'unsupported' && onEnableNotifications && (
+              <button
+                type="button"
+                onClick={onEnableNotifications}
+                title={
+                  notificationPermission === 'granted'
+                    ? 'Alertas del navegador activas'
+                    : notificationPermission === 'denied'
+                      ? 'Alertas bloqueadas en el navegador'
+                      : 'Activar alertas en tiempo real'
+                }
+                style={{
+                  backgroundColor: notificationPermission === 'granted' ? '#0e6027' : '#262626',
+                  border: `1px solid ${notificationPermission === 'granted' ? '#24a148' : '#393939'}`,
+                  color: notificationPermission === 'granted' ? '#ffffff' : '#c6c6c6',
+                  padding: '8px 10px',
+                  minHeight: '36px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '12px',
+                }}
+              >
+                {notificationPermission === 'denied' ? <BellOff size={13} /> : <Bell size={13} />}
+                <span className="cds-masthead-hide-mobile">
+                  {notificationPermission === 'granted'
+                    ? 'Alertas ON'
+                    : notificationPermission === 'denied'
+                      ? 'Bloqueadas'
+                      : 'Alertas'}
+                </span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onLogout}

@@ -1,0 +1,26 @@
+{
+  "name": "Mi Conjunto en Línea",
+  "short_name": "Mi Conjunto",
+  "description": "Plataforma residencial multi-conjunto para paquetería, reservas de zonas comunes y PQRS.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#161616",
+  "theme_color": "#161616",
+  "lang": "es-CO",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
