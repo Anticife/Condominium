@@ -72,7 +72,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
     setErrorMsg(null);
     setInfoMsg(null);
     try {
-      await sendEmailVerification(authUser, { url: window.location.origin });
+      await sendEmailVerification(authUser);
       setInfoMsg(`Correo de verificación enviado a ${authUser.email}. Revise su bandeja de entrada o carpeta de Spam.`);
     } catch (err) {
       setErrorMsg(mapFirebaseAuthError(err));
@@ -111,7 +111,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
     }
     setSubmitting(true);
     try {
-      await sendPasswordResetEmail(auth, email.trim(), { url: window.location.origin });
+      await sendPasswordResetEmail(auth, email.trim());
       setInfoMsg(`Se envió un enlace de recuperación de contraseña a ${email.trim()}. Revise su bandeja de entrada o Spam.`);
     } catch (err) {
       setErrorMsg(mapFirebaseAuthError(err));
@@ -364,7 +364,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
         phone: phone.trim(),
       });
       try {
-        await sendEmailVerification(cred.user, { url: window.location.origin });
+        await sendEmailVerification(cred.user);
         setInfoMsg(`Correo de verificación enviado a ${cred.user.email}. Revise su bandeja de entrada o Spam.`);
       } catch (verifyErr) {
         console.warn('sendEmailVerification warning:', verifyErr);
