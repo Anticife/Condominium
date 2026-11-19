@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Building2,
   ShieldCheck,
   UserCheck,
   SlidersHorizontal,
@@ -109,15 +108,21 @@ export default function CarbonMasthead({
         {/* Brand Lockup */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
           <div style={{
-            backgroundColor: '#0f62fe',
-            color: '#ffffff',
-            padding: '8px',
+            backgroundColor: '#000000',
+            width: '34px',
+            height: '34px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             flexShrink: 0,
+            border: '1px solid #393939',
+            overflow: 'hidden',
           }}>
-            <Building2 size={18} />
+            <img
+              src="/icon-192.png"
+              alt="Mi Conjunto en Línea"
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: '14px', fontWeight: 600, letterSpacing: '0.2px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
