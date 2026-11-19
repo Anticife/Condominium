@@ -236,7 +236,7 @@ export default function CensusImportModal({ isOpen, onClose, condoId, onNotify }
           {/* Validation Preview */}
           {parsed && !report && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+              <div className="cds-form-row-3">
                 <div style={{ padding: '10px 12px', backgroundColor: '#defbe6', border: '1px solid #6fdc8c' }}>
                   <div style={{ fontSize: '11px', color: '#0e6027', fontWeight: 600 }}>FILAS VÁLIDAS</div>
                   <div className="font-mono" style={{ fontSize: '20px', fontWeight: 600, color: '#0e6027' }}>

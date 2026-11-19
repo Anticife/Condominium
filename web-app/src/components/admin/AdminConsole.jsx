@@ -300,7 +300,7 @@ export default function AdminConsole({
   });
 
   return (
-    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px' }}>
+    <div className="cds-page-shell">
       {/* Console Header */}
       <div style={{
         borderBottom: '1px solid #e0e0e0',
@@ -331,7 +331,7 @@ export default function AdminConsole({
         </div>
 
         {/* Subnavigation Tabs */}
-        <div style={{ display: 'flex', border: '1px solid #8d8d8d', flexWrap: 'wrap' }}>
+        <div className="cds-tabs-scroll" style={{ border: '1px solid #8d8d8d' }}>
           {[
             { id: 'dashboard', label: 'Métricas', icon: BarChart3 },
             { id: 'census', label: `Censo (${apartments.length} Aptos)`, icon: Building },
@@ -350,7 +350,10 @@ export default function AdminConsole({
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
-                  padding: '8px 14px',
+                  padding: '10px 14px',
+                  minHeight: '42px',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
                   fontFamily: 'var(--cds-font-sans)',
                   fontSize: '12px',
                   fontWeight: isActive ? 600 : 500,
@@ -464,7 +467,7 @@ export default function AdminConsole({
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+          <div className="cds-grid-kpi" style={{ marginBottom: '20px' }}>
             <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #0f62fe' }}>
               <div style={{ fontSize: '11px', color: '#525252', textTransform: 'uppercase', fontFamily: 'var(--cds-font-mono)' }}>
                 Estructura Activa
@@ -625,7 +628,7 @@ export default function AdminConsole({
           </div>
 
           {/* Forms Row: Create Tower + Create Apartment */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+          <div className="cds-grid-split">
             {/* Create Tower */}
             <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #0f62fe' }}>
               <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -637,7 +640,7 @@ export default function AdminConsole({
               </p>
 
               <form onSubmit={handleTowerSubmit}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                <div className="cds-form-row-2" style={{ marginBottom: '10px' }}>
                   <div>
                     <label className="cds-input-label">CÓDIGO (EJ. T1, BLOQUEA)</label>
                     <input
@@ -690,7 +693,7 @@ export default function AdminConsole({
               </p>
 
               <form onSubmit={handleApartmentSubmit}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                <div className="cds-form-row-2" style={{ marginBottom: '10px' }}>
                   <div>
                     <label className="cds-input-label">TORRE</label>
                     <select
@@ -1449,7 +1452,7 @@ export default function AdminConsole({
               </button>
             </div>
             <div style={{ padding: '20px' }}>
-              <form onSubmit={handleAdminAddAuthorized} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '8px', marginBottom: '16px', alignItems: 'end' }}>
+              <form onSubmit={handleAdminAddAuthorized} className="cds-form-row-4" style={{ marginBottom: '16px' }}>
                 <div>
                   <label className="cds-input-label">NOMBRE</label>
                   <input type="text" className="cds-input" value={newAuthName} onChange={(e) => setNewAuthName(e.target.value)} required />

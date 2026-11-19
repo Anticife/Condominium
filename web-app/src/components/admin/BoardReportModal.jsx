@@ -128,7 +128,7 @@ export default function BoardReportModal({
           </div>
         </div>
 
-        <div style={{ padding: '36px', overflowY: 'auto' }}>
+        <div className="cds-report-body">
           <div style={{ borderBottom: '2px solid #161616', paddingBottom: '16px', marginBottom: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
@@ -206,39 +206,41 @@ export default function BoardReportModal({
                 No se registran paquetes en mora superiores a 15 días calendario en portería.
               </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#f4f4f4', borderBottom: '1px solid #161616', textAlign: 'left' }}>
-                    <th style={{ padding: '8px' }}>Unidad</th>
-                    <th style={{ padding: '8px' }}>Destinatario</th>
-                    <th style={{ padding: '8px' }}>Courier</th>
-                    <th style={{ padding: '8px' }}>Ingreso</th>
-                    <th style={{ padding: '8px' }}>Días</th>
-                    <th style={{ padding: '8px' }}>Mora (RN-B5)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {overduePackages.map((pkg) => {
-                    const days = Math.floor(getElapsedHours(pkg.receivedAt, nowMs) / 24);
-                    const fee = (days - 15) * 5000;
-                    const receivedDate = toDate(pkg.receivedAt);
-                    return (
-                      <tr key={pkg.id} style={{ borderBottom: '1px solid #e0e0e0' }}>
-                        <td style={{ padding: '8px', fontWeight: 600 }}>{pkg.apartmentId}</td>
-                        <td style={{ padding: '8px' }}>{pkg.recipientName}</td>
-                        <td style={{ padding: '8px' }}>{pkg.courier}</td>
-                        <td style={{ padding: '8px', fontFamily: 'var(--cds-font-mono)' }}>
-                          {receivedDate ? receivedDate.toISOString().slice(0, 10) : '—'}
-                        </td>
-                        <td style={{ padding: '8px', color: '#da1e28', fontWeight: 600 }}>{days} días</td>
-                        <td style={{ padding: '8px', fontFamily: 'var(--cds-font-mono)', fontWeight: 600, color: '#da1e28' }}>
-                          ${fee.toLocaleString('es-CO')} COP
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div className="cds-table-container">
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#f4f4f4', borderBottom: '1px solid #161616', textAlign: 'left' }}>
+                      <th style={{ padding: '8px' }}>Unidad</th>
+                      <th style={{ padding: '8px' }}>Destinatario</th>
+                      <th style={{ padding: '8px' }}>Courier</th>
+                      <th style={{ padding: '8px' }}>Ingreso</th>
+                      <th style={{ padding: '8px' }}>Días</th>
+                      <th style={{ padding: '8px' }}>Mora (RN-B5)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overduePackages.map((pkg) => {
+                      const days = Math.floor(getElapsedHours(pkg.receivedAt, nowMs) / 24);
+                      const fee = (days - 15) * 5000;
+                      const receivedDate = toDate(pkg.receivedAt);
+                      return (
+                        <tr key={pkg.id} style={{ borderBottom: '1px solid #e0e0e0' }}>
+                          <td style={{ padding: '8px', fontWeight: 600 }}>{pkg.apartmentId}</td>
+                          <td style={{ padding: '8px' }}>{pkg.recipientName}</td>
+                          <td style={{ padding: '8px' }}>{pkg.courier}</td>
+                          <td style={{ padding: '8px', fontFamily: 'var(--cds-font-mono)' }}>
+                            {receivedDate ? receivedDate.toISOString().slice(0, 10) : '—'}
+                          </td>
+                          <td style={{ padding: '8px', color: '#da1e28', fontWeight: 600 }}>{days} días</td>
+                          <td style={{ padding: '8px', fontFamily: 'var(--cds-font-mono)', fontWeight: 600, color: '#da1e28' }}>
+                            ${fee.toLocaleString('es-CO')} COP
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
@@ -246,32 +248,34 @@ export default function BoardReportModal({
             <h2 style={{ fontSize: '14px', fontWeight: 600, color: '#161616', marginBottom: '10px', textTransform: 'uppercase' }}>
               3. Gestión y Resolución de PQRS (RN-B6)
             </h2>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f4f4f4', borderBottom: '1px solid #161616', textAlign: 'left' }}>
-                  <th style={{ padding: '8px' }}>Radicadas</th>
-                  <th style={{ padding: '8px' }}>En gestión</th>
-                  <th style={{ padding: '8px' }}>Resueltas</th>
-                  <th style={{ padding: '8px' }}>Peticiones</th>
-                  <th style={{ padding: '8px' }}>Quejas</th>
-                  <th style={{ padding: '8px' }}>Reclamos</th>
-                  <th style={{ padding: '8px' }}>Sugerencias</th>
-                  <th style={{ padding: '8px' }}>Tiempo Prom.</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style={{ borderBottom: '1px solid #e0e0e0' }} className="font-mono">
-                  <td style={{ padding: '8px' }}>{pqrsFiled}</td>
-                  <td style={{ padding: '8px' }}>{pqrsInProgress}</td>
-                  <td style={{ padding: '8px', color: '#0e6027', fontWeight: 600 }}>{pqrsResolved}</td>
-                  <td style={{ padding: '8px' }}>{pqrsByCategory.Peticion}</td>
-                  <td style={{ padding: '8px' }}>{pqrsByCategory.Queja}</td>
-                  <td style={{ padding: '8px' }}>{pqrsByCategory.Reclamo}</td>
-                  <td style={{ padding: '8px' }}>{pqrsByCategory.Sugerencia}</td>
-                  <td style={{ padding: '8px', fontWeight: 600 }}>{pqrsAvgHours} hrs</td>
-                </tr>
-              </tbody>
-            </table>
+            <div className="cds-table-container">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#f4f4f4', borderBottom: '1px solid #161616', textAlign: 'left' }}>
+                    <th style={{ padding: '8px' }}>Radicadas</th>
+                    <th style={{ padding: '8px' }}>En gestión</th>
+                    <th style={{ padding: '8px' }}>Resueltas</th>
+                    <th style={{ padding: '8px' }}>Peticiones</th>
+                    <th style={{ padding: '8px' }}>Quejas</th>
+                    <th style={{ padding: '8px' }}>Reclamos</th>
+                    <th style={{ padding: '8px' }}>Sugerencias</th>
+                    <th style={{ padding: '8px' }}>Tiempo Prom.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ borderBottom: '1px solid #e0e0e0' }} className="font-mono">
+                    <td style={{ padding: '8px' }}>{pqrsFiled}</td>
+                    <td style={{ padding: '8px' }}>{pqrsInProgress}</td>
+                    <td style={{ padding: '8px', color: '#0e6027', fontWeight: 600 }}>{pqrsResolved}</td>
+                    <td style={{ padding: '8px' }}>{pqrsByCategory.Peticion}</td>
+                    <td style={{ padding: '8px' }}>{pqrsByCategory.Queja}</td>
+                    <td style={{ padding: '8px' }}>{pqrsByCategory.Reclamo}</td>
+                    <td style={{ padding: '8px' }}>{pqrsByCategory.Sugerencia}</td>
+                    <td style={{ padding: '8px', fontWeight: 600 }}>{pqrsAvgHours} hrs</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div style={{ marginTop: '36px', paddingTop: '20px', borderTop: '1px solid #8d8d8d' }}>

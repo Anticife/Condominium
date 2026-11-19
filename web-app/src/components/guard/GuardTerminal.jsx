@@ -188,7 +188,7 @@ export default function GuardTerminal({
   const guardName = currentUser?.displayName || currentUser?.email || 'Operador de Portería';
 
   return (
-    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px' }}>
+    <div className="cds-page-shell">
       {/* View Title */}
       <div style={{
         borderBottom: '1px solid #e0e0e0',
@@ -219,7 +219,7 @@ export default function GuardTerminal({
       </div>
 
       {towers.length === 0 || apartments.length === 0 ? (
-        <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderLeft: '4px solid #f1c21b', padding: '24px', marginBottom: '24px' }}>
+        <div className="cds-tile" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #f1c21b', marginBottom: '20px' }}>
           <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#161616', marginBottom: '6px' }}>
             Censo pendiente de configuración
           </h2>
@@ -230,7 +230,7 @@ export default function GuardTerminal({
       ) : null}
 
       {/* Main Grid: Fast Intake Form + Custody Inventory */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px', alignItems: 'start' }}>
+      <div className="cds-grid-split">
         {/* LEFT COLUMN: Fast Package Reception */}
         <div className="cds-tile" style={{ border: '2px solid #0f62fe', padding: '20px', background: '#ffffff', maxWidth: '520px', width: '100%' }}>
           <div style={{
@@ -370,7 +370,7 @@ export default function GuardTerminal({
             </div>
 
             {/* Step 4: Tracking & Details */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+            <div className="cds-form-row-2" style={{ marginBottom: '16px' }}>
               <div>
                 <label className="cds-input-label">N° DE GUÍA (OPCIONAL)</label>
                 <input
@@ -613,7 +613,7 @@ export default function GuardTerminal({
 
               <div style={{
                 backgroundColor: '#edf5ff',
-                borderLeft: '4px solid #0f62fe',
+                border: '1px solid #a6c8ff',
                 padding: '10px 14px',
                 fontSize: '12px',
                 color: '#002d9c',

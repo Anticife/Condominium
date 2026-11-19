@@ -247,7 +247,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
               </div>
             )}
 
-            <div style={{ backgroundColor: '#edf5ff', borderLeft: '4px solid #0f62fe', padding: '12px 14px', fontSize: '13px', color: '#002d9c', marginBottom: '16px' }}>
+            <div style={{ backgroundColor: '#edf5ff', border: '1px solid #a6c8ff', padding: '12px 14px', fontSize: '13px', color: '#002d9c', marginBottom: '16px' }}>
               <CheckCircle2 size={15} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
               Su registro como residente se completó correctamente. Por seguridad y protección de datos (Ley 1581), la Administración debe asociar su cuenta a su apartamento antes de habilitar paquetes, reservas y autorizados.
             </div>
@@ -255,7 +255,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
             {/* Estado de verificación de correo */}
             <div style={{
               backgroundColor: isVerified ? '#defbe6' : '#fcf4d6',
-              borderLeft: `4px solid ${isVerified ? '#24a148' : '#f1c21b'}`,
+              border: `1px solid ${isVerified ? '#6fdc8c' : '#f1c21b'}`,
               padding: '12px 14px',
               fontSize: '12px',
               color: '#161616',
@@ -569,7 +569,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div className="cds-form-row-2" style={{ marginBottom: '12px' }}>
                 <div>
                   <label className="cds-input-label">CORREO ELECTRÓNICO</label>
                   <div style={{ position: 'relative' }}>
@@ -602,7 +602,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+              <div className="cds-form-row-2" style={{ marginBottom: '14px' }}>
                 <div>
                   <label className="cds-input-label">CONTRASEÑA (MÍN. 6)</label>
                   <input

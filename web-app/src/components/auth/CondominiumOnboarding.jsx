@@ -89,15 +89,16 @@ export default function CondominiumOnboarding({ userProfile }) {
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      backgroundColor: '#161616',
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: '24px',
-      fontFamily: 'var(--cds-font-sans)',
-    }}>
+    <div
+      className="cds-auth-shell"
+      style={{
+        backgroundColor: '#161616',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        fontFamily: 'var(--cds-font-sans)',
+      }}
+    >
       <div style={{
         backgroundColor: '#ffffff',
         width: '100%',
@@ -259,7 +260,7 @@ export default function CondominiumOnboarding({ userProfile }) {
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div className="cds-form-row-2" style={{ marginBottom: '12px' }}>
                 <div>
                   <label className="cds-input-label">NIT (OPCIONAL)</label>
                   <input

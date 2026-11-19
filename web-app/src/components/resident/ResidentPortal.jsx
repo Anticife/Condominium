@@ -253,7 +253,7 @@ export default function ResidentPortal({
   const openPqrsCount = pqrs.filter((t) => t.status !== 'Resuelta').length;
 
   return (
-    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px' }}>
+    <div className="cds-page-shell">
       {/* Resident Identity Header Card (Real Firestore Data) */}
       <div className="cds-tile" style={{ marginBottom: '24px', backgroundColor: '#ffffff', border: '1px solid #e0e0e0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
@@ -292,7 +292,7 @@ export default function ResidentPortal({
         </div>
 
         {/* Tab Navigation */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #e0e0e0', marginTop: '20px', overflowX: 'auto' }}>
+        <div className="cds-tabs-scroll" style={{ borderBottom: '1px solid #e0e0e0', marginTop: '20px' }}>
           {[
             { id: 'packages', label: 'Mis Paquetes', icon: Package, badge: pendingPackagesCount },
             { id: 'reservations', label: 'Zonas Comunes (Reservas)', icon: Calendar, badge: reservations.length },
@@ -349,7 +349,7 @@ export default function ResidentPortal({
             <span className="cds-tag cds-tag-blue">RN-B7: HABEAS DATA ACTIVO</span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+          <div className="cds-grid-cards">
             {packages.length === 0 ? (
               <div className="cds-tile" style={{ gridColumn: '1/-1', textAlign: 'center', padding: '40px', color: '#8d8d8d' }}>
                 <Package size={32} style={{ margin: '0 auto 10px', display: 'block', opacity: 0.5 }} />
@@ -411,7 +411,7 @@ export default function ResidentPortal({
 
       {/* TAB 2: RESERVAS DE ZONAS COMUNES (CON-06: RN-B1, RN-B2, RN-B3) */}
       {activeTab === 'reservations' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px', alignItems: 'start' }}>
+        <div className="cds-grid-split">
           <div className="cds-tile" style={{ backgroundColor: '#ffffff', border: '2px solid #0f62fe', maxWidth: '480px', width: '100%' }}>
             <div style={{ borderBottom: '1px solid #e0e0e0', paddingBottom: '10px', marginBottom: '16px' }}>
               <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#161616' }}>Solicitar Zona Común</h2>
@@ -622,7 +622,7 @@ export default function ResidentPortal({
 
       {/* TAB 3: PERSONAS AUTORIZADAS (CON-02, RN-B4, RN-B7) */}
       {activeTab === 'authorized' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px', alignItems: 'start' }}>
+        <div className="cds-grid-split">
           <div className="cds-tile" style={{ backgroundColor: '#ffffff', border: '1px solid #e0e0e0', maxWidth: '460px', width: '100%' }}>
             <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>
               Registrar Persona Autorizada
@@ -822,7 +822,7 @@ export default function ResidentPortal({
       {/* TAB 5: PQRS CON RADICADO CONSECUTIVO E HISTORIAL INMUTABLE (CON-08 / CON-09 / RN-B6) */}
       {activeTab === 'pqrs' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', alignItems: 'start' }}>
+          <div className="cds-grid-split">
             {/* Radication Form */}
             <div className="cds-tile" style={{ backgroundColor: '#ffffff' }}>
               <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#161616', marginBottom: '4px' }}>

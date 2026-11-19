@@ -67,42 +67,22 @@ export default function CarbonMasthead({
       : `ESTRUCTURA: ${towersCount} ${towersCount === 1 ? 'TORRE' : 'TORRES'} // ${apartmentsCount} ${apartmentsCount === 1 ? 'UNIDAD' : 'UNIDADES'}`;
 
   return (
-    <header style={{
-      backgroundColor: '#161616',
-      borderBottom: '1px solid #393939',
-      color: '#ffffff',
-      position: 'sticky',
-      top: 0,
-      zIndex: 1000,
-      fontFamily: 'var(--cds-font-sans)',
-    }}>
+    <header className="cds-masthead-header">
       {/* Top Banner Telemetry Line */}
-      <div style={{
-        backgroundColor: '#001141',
-        borderBottom: '1px solid #1f2a44',
-        padding: '4px 20px',
-        fontSize: '11px',
-        fontFamily: 'var(--cds-font-mono)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: '8px',
-        color: '#c6c6c6',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+      <div className="cds-masthead-telemetry">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#42be65' }}>
             <Activity size={12} />
-            CLOUD FIRESTORE ACTIVO (PLAN SPARK)
+            FIRESTORE ACTIVO
           </span>
-          <span style={{ color: '#8d8d8d' }}>|</span>
+          <span className="cds-masthead-hide-mobile" style={{ color: '#8d8d8d' }}>|</span>
           <span>{unitScopeText}</span>
-          <span style={{ color: '#8d8d8d' }}>|</span>
-          <span style={{ color: '#78a9ff' }}>RN-B1..RN-B7 VERIFICADAS</span>
+          <span className="cds-masthead-hide-mobile" style={{ color: '#8d8d8d' }}>|</span>
+          <span className="cds-masthead-hide-mobile" style={{ color: '#78a9ff' }}>RN-B1..RN-B7 VERIFICADAS</span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span className="cds-masthead-hide-mobile" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <Clock size={12} color="#4589ff" />
             BOGOTÁ (UTC-5): <strong>{timeStr}</strong>
           </span>
@@ -114,24 +94,16 @@ export default function CarbonMasthead({
               fontWeight: 600,
               fontSize: '10px',
             }}>
-              RN-B5: {overduePackagesCount} EN BODEGAJE &gt;15D
+              RN-B5: {overduePackagesCount} &gt;15D
             </span>
           )}
         </div>
       </div>
 
       {/* Main Carbon Masthead Bar */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '0 20px',
-        minHeight: '56px',
-        flexWrap: 'wrap',
-        gap: '12px',
-      }}>
+      <div className="cds-masthead-main">
         {/* Brand Lockup */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
           <div style={{
             backgroundColor: '#0f62fe',
             color: '#ffffff',
@@ -139,18 +111,19 @@ export default function CarbonMasthead({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            flexShrink: 0,
           }}>
-            <Building2 size={20} />
+            <Building2 size={18} />
           </div>
-          <div>
-            <div style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '0.2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              Mi Conjunto en Línea
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: '14px', fontWeight: 600, letterSpacing: '0.2px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span>Mi Conjunto en Línea</span>
               <span style={{
                 fontSize: '10px',
                 fontFamily: 'var(--cds-font-mono)',
                 backgroundColor: roleInfo.badgeColor,
                 color: '#ffffff',
-                padding: '2px 7px',
+                padding: '2px 6px',
                 fontWeight: 600,
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -160,56 +133,58 @@ export default function CarbonMasthead({
                 {roleInfo.label.toUpperCase()}
               </span>
             </div>
-            <div style={{ fontSize: '11px', color: '#c6c6c6' }}>
-              {condominium?.name || 'Mi Conjunto en Línea'} — Operación Digital
+            <div style={{ fontSize: '11px', color: '#c6c6c6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {condominium?.name || 'Mi Conjunto en Línea'}
             </div>
           </div>
         </div>
 
-        {/* Live Telemetry Counters */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-            <Package size={16} color="#78a9ff" />
-            <span style={{ color: '#c6c6c6' }}>Pendientes:</span>
-            <span style={{
-              fontFamily: 'var(--cds-font-mono)',
-              fontWeight: 600,
-              color: pendingPackagesCount > 0 ? '#4589ff' : '#8d8d8d',
-            }}>
-              {pendingPackagesCount} {pendingPackagesCount === 1 ? 'paquete' : 'paquetes'}
-            </span>
+        {/* Live Telemetry Counters + Session */}
+        <div className="cds-masthead-right">
+          <div className="cds-masthead-counters">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', whiteSpace: 'nowrap' }}>
+              <Package size={15} color="#78a9ff" />
+              <span className="cds-masthead-hide-mobile" style={{ color: '#c6c6c6' }}>Pendientes:</span>
+              <span style={{
+                fontFamily: 'var(--cds-font-mono)',
+                fontWeight: 600,
+                color: pendingPackagesCount > 0 ? '#4589ff' : '#8d8d8d',
+              }}>
+                {pendingPackagesCount} paq.
+              </span>
+            </div>
+
+            {userProfile?.role !== 'portero' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                <CalendarDays size={15} color="#a7f0ba" />
+                <span className="cds-masthead-hide-mobile" style={{ color: '#c6c6c6' }}>Reservas:</span>
+                <span style={{
+                  fontFamily: 'var(--cds-font-mono)',
+                  fontWeight: 600,
+                  color: pendingReservationsCount > 0 ? '#f1c21b' : '#8d8d8d',
+                }}>
+                  {pendingReservationsCount} res.
+                </span>
+              </div>
+            )}
+
+            {userProfile?.role !== 'portero' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                <MessageSquareText size={15} color="#d4bbff" />
+                <span className="cds-masthead-hide-mobile" style={{ color: '#c6c6c6' }}>PQRS:</span>
+                <span style={{
+                  fontFamily: 'var(--cds-font-mono)',
+                  fontWeight: 600,
+                  color: openPqrsCount > 0 ? '#d4bbff' : '#8d8d8d',
+                }}>
+                  {openPqrsCount} PQRS
+                </span>
+              </div>
+            )}
           </div>
 
-          {userProfile?.role !== 'portero' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-              <CalendarDays size={16} color="#a7f0ba" />
-              <span style={{ color: '#c6c6c6' }}>Reservas:</span>
-              <span style={{
-                fontFamily: 'var(--cds-font-mono)',
-                fontWeight: 600,
-                color: pendingReservationsCount > 0 ? '#f1c21b' : '#8d8d8d',
-              }}>
-                {pendingReservationsCount} por resolver
-              </span>
-            </div>
-          )}
-
-          {userProfile?.role !== 'portero' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-              <MessageSquareText size={16} color="#d4bbff" />
-              <span style={{ color: '#c6c6c6' }}>PQRS:</span>
-              <span style={{
-                fontFamily: 'var(--cds-font-mono)',
-                fontWeight: 600,
-                color: openPqrsCount > 0 ? '#d4bbff' : '#8d8d8d',
-              }}>
-                {openPqrsCount} {openPqrsCount === 1 ? 'abierta' : 'abiertas'}
-              </span>
-            </div>
-          )}
-
           {/* Authenticated User Session */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', borderLeft: '1px solid #393939', paddingLeft: '14px' }}>
+          <div className="cds-masthead-session">
             <div style={{
               width: '28px',
               height: '28px',
@@ -221,10 +196,11 @@ export default function CarbonMasthead({
               fontSize: '11px',
               fontWeight: 600,
               fontFamily: 'var(--cds-font-mono)',
+              flexShrink: 0,
             }}>
               {initials}
             </div>
-            <div style={{ lineHeight: 1.2 }}>
+            <div className="cds-masthead-hide-mobile" style={{ lineHeight: 1.2 }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff' }}>
                 {displayName}
               </div>
@@ -240,16 +216,16 @@ export default function CarbonMasthead({
                 backgroundColor: '#262626',
                 border: '1px solid #393939',
                 color: '#c6c6c6',
-                padding: '6px 10px',
+                padding: '8px 10px',
+                minHeight: '36px',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '5px',
-                fontSize: '11px',
-                marginLeft: '4px',
+                fontSize: '12px',
               }}
             >
-              <LogOut size={12} />
+              <LogOut size={13} />
               <span>Salir</span>
             </button>
           </div>

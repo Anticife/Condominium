@@ -354,28 +354,19 @@ export default function App() {
       />
 
       {toastNotification && (
-        <div style={{
-          position: 'fixed',
-          top: '80px',
-          right: '24px',
-          zIndex: 9999,
-          backgroundColor: toastNotification.type === 'error' ? '#da1e28' : toastNotification.type === 'success' ? '#24a148' : '#0f62fe',
-          color: '#ffffff',
-          padding: '12px 18px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-          fontFamily: 'var(--cds-font-sans)',
-          fontSize: '13px',
-          maxWidth: '450px',
-        }}>
+        <div
+          className="cds-toast"
+          style={{
+            backgroundColor: toastNotification.type === 'error' ? '#da1e28' : toastNotification.type === 'success' ? '#24a148' : '#0f62fe',
+          }}
+        >
           {toastNotification.type === 'error' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
           <div style={{ flex: 1 }}>{toastNotification.message}</div>
           <button
             type="button"
+            aria-label="Cerrar notificación"
             onClick={() => setToastNotification(null)}
-            style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', display: 'flex' }}
+            style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', display: 'flex', padding: '4px' }}
           >
             <X size={16} />
           </button>
@@ -441,19 +432,7 @@ export default function App() {
         )}
       </main>
 
-      <footer style={{
-        backgroundColor: '#161616',
-        color: '#8d8d8d',
-        borderTop: '1px solid #393939',
-        padding: '16px 24px',
-        fontSize: '12px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: '12px',
-        fontFamily: 'var(--cds-font-sans)',
-      }}>
+      <footer className="cds-footer">
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <strong style={{ color: '#ffffff' }}>{condominium?.name || 'Mi Conjunto en Línea'}</strong>
           <span>Plataforma Multi-Conjunto</span>

@@ -185,11 +185,11 @@ export default function AdminPqrsTab({
           })}
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', flex: '1 1 260px', justifyContent: 'flex-end' }}>
           <select
             aria-label="Filtrar por categoría PQRS"
             className="cds-select"
-            style={{ width: '165px', height: '36px', fontSize: '13px' }}
+            style={{ flex: '1 1 155px', minWidth: '140px', height: '38px', fontSize: '13px' }}
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
           >
@@ -201,7 +201,7 @@ export default function AdminPqrsTab({
             ))}
           </select>
 
-          <div style={{ position: 'relative', minWidth: '240px' }}>
+          <div style={{ position: 'relative', flex: '2 1 200px', minWidth: '180px' }}>
             <Search
               size={15}
               color="#525252"
@@ -210,7 +210,7 @@ export default function AdminPqrsTab({
             <input
               type="text"
               className="cds-input"
-              style={{ height: '36px', paddingLeft: '32px', fontSize: '13px' }}
+              style={{ height: '38px', paddingLeft: '32px', fontSize: '13px' }}
               placeholder="Buscar radicado, apto o asunto..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
