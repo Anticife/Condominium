@@ -26,6 +26,7 @@ const COURIERS = [
 ];
 
 export default function GuardTerminal({
+  condoId,
   currentUser,
   towers,
   apartments,
@@ -125,7 +126,7 @@ export default function GuardTerminal({
     setDeliveryNotes('');
 
     try {
-      const authorizedList = await listActiveAuthorized(db, pkg.apartmentId);
+      const authorizedList = await listActiveAuthorized(db, condoId, pkg.apartmentId);
       setDeliveryTarget({ pkg, authorizedList, loading: false, error: null });
       if (authorizedList.length > 0) {
         setSelectedAuthId(authorizedList[0].id);

@@ -28,6 +28,7 @@ import {
 } from '../../services/dateUtils';
 
 export default function ResidentPortal({
+  condoId,
   currentUser,
   apartment,
   authorizedPeople,
@@ -73,7 +74,7 @@ export default function ResidentPortal({
   useEffect(() => {
     if (!bookingDate) return undefined;
     let cancelled = false;
-    getTakenSlots(db, selectedArea, bookingDate)
+    getTakenSlots(db, condoId, selectedArea, bookingDate)
       .then((slots) => {
         if (!cancelled) setTakenSlots(slots);
       })
@@ -86,7 +87,7 @@ export default function ResidentPortal({
     return () => {
       cancelled = true;
     };
-  }, [selectedArea, bookingDate]);
+  }, [condoId, selectedArea, bookingDate]);
 
   const minDateStr = new Date(nowMs + MIN_NOTICE_HOURS * 60 * 60 * 1000).toISOString().split('T')[0];
 

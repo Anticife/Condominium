@@ -1,4 +1,4 @@
-// SCRUM-43: carga masiva del censo (CSV/Excel -> writeBatch <= 400) y protección en firestore.rules.
+// SCRUM-43: carga masiva del censo (CSV/Excel -> writeBatch <= 400, Multi-Tenant).
 import { assertFails, type RulesTestEnvironment } from '@firebase/rules-unit-testing'
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -7,7 +7,9 @@ import {
   importCensusFromCsv,
   parseCensusCsv,
 } from '../../src/services/censusImporter'
-import { anonDb, createEnv, dbAs, hasEmulator, seed, UIDS } from '../rules/helpers'
+import { anonDb, CONDO_A, createEnv, dbAs, hasEmulator, seed, UIDS } from '../rules/helpers'
+
+const cPath = `condominiums/${CONDO_A}`
 
 describe('parseCensusCsv (SCRUM-43 unit)', () => {
   it('parsea 3 torres y 240 apartamentos sin errores', () => {
@@ -65,28 +67,28 @@ describe.skipIf(!hasEmulator)('importCensusBatch (SCRUM-43 emulator)', () => {
     ].join('\n')
 
     const adminDb = dbAs(env, UIDS.admin)
-    // chunkSize: 2 para verificar múltiples writeBatch en el emulador
-    const report = await importCensusFromCsv(adminDb, csv, { chunkSize: 2 })
+    const report = await importCensusFromCsv(adminDb, CONDO_A, csv, { chunkSize: 2 })
 
     expect(report.towersProcessed).toBe(3)
     expect(report.apartmentsCreated).toBe(4)
     expect(report.skippedDuplicates).toBe(1)
-    expect(report.batchesCommitted).toBe(4) // 2 batches de torres (2+1) + 2 batches de aptos (2+2)
+    expect(report.batchesCommitted).toBe(4)
     expect(report.errors[0].reason).toContain('T1-101')
 
-    const t3Snap = await getDoc(doc(adminDb, 'towers/T3'))
+    const t3Snap = await getDoc(doc(adminDb, `${cPath}/towers/T3`))
     expect(t3Snap.exists()).toBe(true)
-    const aptSnap = await getDocs(collection(adminDb, 'apartments'))
-    expect(aptSnap.size).toBe(6) // 2 del seed + 4 nuevos
+    const aptSnap = await getDocs(collection(adminDb, `${cPath}/apartments`))
+    expect(aptSnap.size).toBe(6)
   })
 
-  it('bloquea con permission-denied a residente, portero y anónimo en firestore.rules', async () => {
+  it('bloquea con permission-denied a residente, portero, administradora de otro conjunto y anónimo', async () => {
     const { validRows } = parseCensusCsv(
       'Torre,Apartamento,NombreResidente,Email,Telefono,EsPropietario\nT9,901,Intruso,i@test.co,300,Si',
     )
 
-    await assertFails(importCensusBatch(dbAs(env, UIDS.res101), validRows))
-    await assertFails(importCensusBatch(dbAs(env, UIDS.portero), validRows))
-    await assertFails(importCensusBatch(anonDb(env), validRows))
+    await assertFails(importCensusBatch(dbAs(env, UIDS.res101), CONDO_A, validRows))
+    await assertFails(importCensusBatch(dbAs(env, UIDS.portero), CONDO_A, validRows))
+    await assertFails(importCensusBatch(dbAs(env, UIDS.adminB), CONDO_A, validRows))
+    await assertFails(importCensusBatch(anonDb(env), CONDO_A, validRows))
   })
 })

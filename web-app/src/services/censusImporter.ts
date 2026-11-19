@@ -223,6 +223,7 @@ function chunkArray<T>(items: T[], size: number): T[][] {
  */
 export async function importCensusBatch(
   db: Firestore,
+  condoId: string,
   rows: CensusRow[],
   options: { chunkSize?: number } = {},
 ): Promise<CensusImportReport> {
@@ -244,8 +245,8 @@ export async function importCensusBatch(
     }
   }
 
-  // Consultar apartamentos existentes para detectar duplicados sin abortar los lotes.
-  const existingSnap = await getDocs(collection(db, 'apartments'))
+  // Consultar apartamentos existentes en este conjunto para detectar duplicados sin abortar.
+  const existingSnap = await getDocs(collection(db, 'condominiums', condoId, 'apartments'))
   const existingIds = new Set(existingSnap.docs.map((d) => d.id))
 
   const towerCounts = new Map<string, number>()
@@ -255,13 +256,13 @@ export async function importCensusBatch(
 
   let batchesCommitted = 0
 
-  // Fase 1: torres (deben existir antes de crear los apartamentos por firestore.rules).
+  // Fase 1: torres del conjunto.
   const towerEntries = Array.from(towerCounts.entries())
   for (const chunk of chunkArray(towerEntries, chunkSize)) {
     const batch = writeBatch(db)
     for (const [towerId, count] of chunk) {
       batch.set(
-        doc(db, 'towers', towerId),
+        doc(db, 'condominiums', condoId, 'towers', towerId),
         {
           id: towerId,
           name: towerId.startsWith('T') && /^T\d+$/.test(towerId) ? `Torre ${towerId.slice(1)}` : `Torre ${towerId}`,
@@ -293,7 +294,7 @@ export async function importCensusBatch(
   for (const chunk of chunkArray(toCreate, chunkSize)) {
     const batch = writeBatch(db)
     for (const row of chunk) {
-      batch.set(doc(db, 'apartments', row.apartmentId), {
+      batch.set(doc(db, 'condominiums', condoId, 'apartments', row.apartmentId), {
         id: row.apartmentId,
         towerId: row.towerId,
         number: row.apartmentNumber,
@@ -315,14 +316,15 @@ export async function importCensusBatch(
   }
 }
 
-/** Atajo completo: parsea CSV y ejecuta la carga por lotes en Firestore. */
+/** Atajo completo: parsea CSV y ejecuta la carga por lotes en Firestore para el conjunto. */
 export async function importCensusFromCsv(
   db: Firestore,
+  condoId: string,
   csvText: string,
   options?: { chunkSize?: number },
 ): Promise<CensusImportReport> {
   const parsed = parseCensusCsv(csvText)
-  const batchReport = await importCensusBatch(db, parsed.validRows, options)
+  const batchReport = await importCensusBatch(db, condoId, parsed.validRows, options)
   return {
     ...batchReport,
     errors: [...parsed.errors, ...batchReport.errors],

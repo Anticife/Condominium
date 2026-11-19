@@ -23,6 +23,8 @@ import { AREA_LABELS } from '../../services/reservationSlots';
 import { formatDateCO, formatTimeCO, getElapsedHours, toDate } from '../../services/dateUtils';
 
 export default function AdminConsole({
+  condoId,
+  condominium,
   currentUser,
   towers,
   apartments,
@@ -150,7 +152,7 @@ export default function AdminConsole({
   const handleOpenAptAuth = async (apt) => {
     setAptAuthModal({ apartment: apt, list: [], loading: true });
     try {
-      const list = await listActiveAuthorized(db, apt.id);
+      const list = await listActiveAuthorized(db, condoId, apt.id);
       setAptAuthModal({ apartment: apt, list, loading: false });
     } catch (err) {
       setAptAuthModal({ apartment: apt, list: [], loading: false });
@@ -162,12 +164,12 @@ export default function AdminConsole({
     e.preventDefault();
     if (!aptAuthModal) return;
     try {
-      await addAuthorizedPerson(db, aptAuthModal.apartment.id, {
+      await addAuthorizedPerson(db, condoId, aptAuthModal.apartment.id, {
         fullName: newAuthName,
         documentId: newAuthDoc,
         relation: newAuthRelation,
       });
-      const updated = await listActiveAuthorized(db, aptAuthModal.apartment.id);
+      const updated = await listActiveAuthorized(db, condoId, aptAuthModal.apartment.id);
       setAptAuthModal((prev) => ({ ...prev, list: updated }));
       setNewAuthName('');
       setNewAuthDoc('');
@@ -180,8 +182,8 @@ export default function AdminConsole({
   const handleAdminDeactivateAuth = async (authId) => {
     if (!aptAuthModal) return;
     try {
-      await setAuthorizedActive(db, aptAuthModal.apartment.id, authId, false);
-      const updated = await listActiveAuthorized(db, aptAuthModal.apartment.id);
+      await setAuthorizedActive(db, condoId, aptAuthModal.apartment.id, authId, false);
+      const updated = await listActiveAuthorized(db, condoId, aptAuthModal.apartment.id);
       setAptAuthModal((prev) => ({ ...prev, list: updated }));
       onNotify('info', 'Autorización desactivada.');
     } catch (err) {
@@ -245,13 +247,19 @@ export default function AdminConsole({
       }}>
         <div>
           <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', color: '#0f62fe', fontWeight: 600 }}>
-            PANEL DE ADMINISTRACIÓN // CONDOMINIUM-F6236
+            PANEL DE ADMINISTRACIÓN // {condominium?.name ? condominium.name.toUpperCase() : 'MULTI-TENANT'}
+            {condominium?.joinCode ? ` // CÓDIGO DE INVITACIÓN: ${condominium.joinCode}` : ''}
           </div>
           <h1 style={{ fontSize: '26px', fontWeight: 600, color: '#161616', marginTop: '4px' }}>
             Gestión Operativa, Censo y Control de Acceso
           </h1>
           <p style={{ fontSize: '13px', color: '#525252', marginTop: '2px' }}>
             Administración real en Cloud Firestore: torres, apartamentos, cuentas, roles (CON-01 / CON-02) y telemetría operativa.
+            {condominium?.joinCode && (
+              <>
+                {' '}Comparte el código <strong className="font-mono" style={{ color: '#0f62fe' }}>{condominium.joinCode}</strong> con tus residentes y porteros para vincularlos.
+              </>
+            )}
           </p>
         </div>
 
@@ -1168,6 +1176,7 @@ export default function AdminConsole({
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
         currentUser={currentUser}
+        condominium={condominium}
         towers={towers}
         apartments={apartments}
         packages={packages}

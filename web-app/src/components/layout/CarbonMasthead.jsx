@@ -20,6 +20,7 @@ const ROLE_META = {
 
 export default function CarbonMasthead({
   userProfile,
+  condominium,
   towersCount,
   apartmentsCount,
   packages,
@@ -157,7 +158,7 @@ export default function CarbonMasthead({
               </span>
             </div>
             <div style={{ fontSize: '11px', color: '#c6c6c6' }}>
-              Altos del Parque P.H. — Operación Digital
+              {condominium?.name || 'Mi Conjunto en Línea'} — Operación Digital
             </div>
           </div>
         </div>

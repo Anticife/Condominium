@@ -6,6 +6,7 @@ export default function BoardReportModal({
   isOpen,
   onClose,
   currentUser,
+  condominium,
   towers,
   apartments,
   packages,
@@ -95,7 +96,7 @@ export default function BoardReportModal({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <h1 style={{ fontSize: '20px', fontWeight: 700, margin: 0, color: '#161616' }}>
-                  CONJUNTO RESIDENCIAL ALTOS DEL PARQUE P.H.
+                  {(condominium?.name || 'CONJUNTO RESIDENCIAL').toUpperCase()}
                 </h1>
                 <div style={{ fontSize: '12px', color: '#525252', marginTop: '4px' }}>
                   Datos en vivo desde Cloud Firestore • Ley 675 de 2001
@@ -196,7 +197,7 @@ export default function BoardReportModal({
             <div style={{ fontWeight: 600, fontSize: '12px' }}>
               Generado por: {currentUser?.displayName || currentUser?.email || 'Administración'}
             </div>
-            <div style={{ fontSize: '11px', color: '#525252' }}>Administración — Altos del Parque P.H.</div>
+            <div style={{ fontSize: '11px', color: '#525252' }}>Administración — {condominium?.name || 'Mi Conjunto en Línea'}</div>
           </div>
         </div>
       </div>

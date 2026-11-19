@@ -1,9 +1,11 @@
-// SCRUM-46: auditoría integral de firestore.rules y matriz de seguridad por rol (RN-B1 a RN-B7).
+// SCRUM-46: auditoría integral de firestore.rules y matriz de seguridad por rol (Multi-Tenant).
 import { assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing'
 import { deleteDoc, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { anonDb, createEnv, dbAs, hasEmulator, seed, UIDS } from './helpers'
+import { anonDb, CONDO_A, createEnv, dbAs, hasEmulator, seed, UIDS } from './helpers'
+
+const cPath = `condominiums/${CONDO_A}`
 
 describe('firestore.rules static audit (SCRUM-46)', () => {
   const rulesSource = readFileSync(new URL('../../../firestore.rules', import.meta.url), 'utf8')
@@ -17,9 +19,11 @@ describe('firestore.rules static audit (SCRUM-46)', () => {
     expect(rulesSource).toMatch(/match\s+\/\{document=\*\*\}\s*\{\s*allow\s+read,\s*write:\s*if\s+false;/)
   })
 
-  it('cubre todas las colecciones del dominio', () => {
+  it('cubre todas las colecciones del dominio multi-tenant', () => {
     for (const col of [
       'match /users/{userId}',
+      'match /joinCodes/{code}',
+      'match /condominiums/{condoId}',
       'match /towers/{towerId}',
       'match /apartments/{apartmentId}',
       'match /authorized/{authId}',
@@ -56,25 +60,25 @@ describe.skipIf(!hasEmulator)('firestore.rules end-to-end security matrix (SCRUM
 
   it('usuario anónimo no puede leer ni escribir en ninguna colección del sistema (RN-B7)', async () => {
     const anon = anonDb(env)
-    await assertFails(getDoc(doc(anon, 'towers/T1')))
-    await assertFails(getDoc(doc(anon, 'apartments/T1-101')))
+    await assertFails(getDoc(doc(anon, `${cPath}/towers/T1`)))
+    await assertFails(getDoc(doc(anon, `${cPath}/apartments/T1-101`)))
     await assertFails(getDoc(doc(anon, `users/${UIDS.res101}`)))
-    await assertFails(getDoc(doc(anon, 'counters/pqrs')))
-    await assertFails(setDoc(doc(anon, 'towers/T9'), { id: 'T9', name: 'Torre 9', totalApartments: 10 }))
+    await assertFails(getDoc(doc(anon, `${cPath}/counters/pqrs`)))
+    await assertFails(setDoc(doc(anon, `${cPath}/towers/T9`), { id: 'T9', name: 'Torre 9', totalApartments: 10 }))
   })
 
   it('usuario desactivado pierde todos sus privilegios aunque tenga rol administradora', async () => {
     const inactiveDb = dbAs(env, UIDS.inactive)
-    await assertFails(setDoc(doc(inactiveDb, 'towers/T9'), { id: 'T9', name: 'Torre 9', totalApartments: 10 }))
-    await assertFails(getDoc(doc(inactiveDb, 'apartments/T1-101')))
+    await assertFails(setDoc(doc(inactiveDb, `${cPath}/towers/T9`), { id: 'T9', name: 'Torre 9', totalApartments: 10 }))
+    await assertFails(getDoc(doc(inactiveDb, `${cPath}/apartments/T1-101`)))
     await assertFails(getDoc(doc(inactiveDb, `users/${UIDS.res101}`)))
   })
 
-  it('ningún rol puede eliminar usuarios, paquetes, reservas, contadores ni PQRS', async () => {
+  it('ningún rol puede eliminar conjuntos, usuarios, paquetes, reservas, contadores ni PQRS', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore()
-      await setDoc(doc(db, 'counters/pqrs'), { year: 2026, sequence: 1 })
-      await setDoc(doc(db, 'pqrs/p-del'), {
+      await setDoc(doc(db, `${cPath}/counters/pqrs`), { year: 2026, sequence: 1 })
+      await setDoc(doc(db, `${cPath}/pqrs/p-del`), {
         ticketNumber: 'PQ-2026-0001', apartmentId: 'T1-101', residentId: UIDS.res101,
         category: 'Queja', subject: 'Test', description: 'Test desc', status: 'Radicada',
         createdAt: serverTimestamp(),
@@ -82,16 +86,17 @@ describe.skipIf(!hasEmulator)('firestore.rules end-to-end security matrix (SCRUM
     })
 
     const adminDb = dbAs(env, UIDS.admin)
+    await assertFails(deleteDoc(doc(adminDb, cPath)))
     await assertFails(deleteDoc(doc(adminDb, `users/${UIDS.res101}`)))
-    await assertFails(deleteDoc(doc(adminDb, 'counters/pqrs')))
-    await assertFails(deleteDoc(doc(adminDb, 'pqrs/p-del')))
+    await assertFails(deleteDoc(doc(adminDb, `${cPath}/counters/pqrs`)))
+    await assertFails(deleteDoc(doc(adminDb, `${cPath}/pqrs/p-del`)))
   })
 
-  it('permite operaciones legítimas de lectura según matriz de roles', async () => {
-    await assertSucceeds(getDoc(doc(dbAs(env, UIDS.admin), 'apartments/T1-101')))
-    await assertSucceeds(getDoc(doc(dbAs(env, UIDS.portero), 'apartments/T1-101')))
-    await assertSucceeds(getDoc(doc(dbAs(env, UIDS.res101), 'apartments/T1-101')))
-    await assertFails(getDoc(doc(dbAs(env, UIDS.res101), 'apartments/T1-102')))
+  it('permite operaciones legítimas de lectura según matriz de roles dentro del mismo conjunto', async () => {
+    await assertSucceeds(getDoc(doc(dbAs(env, UIDS.admin), `${cPath}/apartments/T1-101`)))
+    await assertSucceeds(getDoc(doc(dbAs(env, UIDS.portero), `${cPath}/apartments/T1-101`)))
+    await assertSucceeds(getDoc(doc(dbAs(env, UIDS.res101), `${cPath}/apartments/T1-101`)))
+    await assertFails(getDoc(doc(dbAs(env, UIDS.res101), `${cPath}/apartments/T1-102`)))
     await assertSucceeds(updateDoc(doc(dbAs(env, UIDS.res101), `users/${UIDS.res101}`), { phone: '3009998888' }))
   })
 })

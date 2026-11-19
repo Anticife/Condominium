@@ -14,7 +14,7 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('Altos del Parque UI Error:', error, errorInfo);
+    console.error('Mi Conjunto en Línea UI Error:', error, errorInfo);
   }
 
   render() {
@@ -38,7 +38,7 @@ class ErrorBoundary extends React.Component {
             padding: '32px'
           }}>
             <div style={{ fontSize: '11px', fontFamily: 'var(--cds-font-mono)', color: '#fa4d56', fontWeight: 600, marginBottom: '8px' }}>
-              CRITICAL RUNTIME RECOVERY // ALTOS DEL PARQUE
+              CRITICAL RUNTIME RECOVERY // MI CONJUNTO EN LÍNEA
             </div>
             <h1 style={{ fontSize: '20px', fontWeight: 600, color: '#ffffff', marginBottom: '12px' }}>
               Excepción de Interfaz Detectada

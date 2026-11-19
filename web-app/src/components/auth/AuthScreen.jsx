@@ -409,7 +409,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
           </div>
           <div>
             <div style={{ fontSize: '10px', fontFamily: 'var(--cds-font-mono)', color: '#78a9ff', letterSpacing: '0.6px' }}>
-              MI CONJUNTO EN LÍNEA // ALTOS DEL PARQUE P.H.
+              MI CONJUNTO EN LÍNEA // PLATAFORMA MULTI-CONJUNTO P.H.
             </div>
             <h1 style={{ fontSize: '18px', fontWeight: 600, marginTop: '2px' }}>
               Acceso al Sistema Operativo
@@ -682,7 +682,7 @@ export default function AuthScreen({ authUser, userProfile, profileLoading, onPr
               color: '#393939',
               lineHeight: 1.4,
             }}>
-              <p style={{ fontWeight: 600, marginBottom: '4px' }}>POLÍTICA DE TRATAMIENTO DE DATOS — ALTOS DEL PARQUE P.H.</p>
+              <p style={{ fontWeight: 600, marginBottom: '4px' }}>POLÍTICA DE TRATAMIENTO DE DATOS — MI CONJUNTO EN LÍNEA</p>
               <p>1. Finalidad: Control de paquetería en portería (RN-B4), reservas de zonas comunes (RN-B1..B3) y gestión de PQRS (RN-B6).</p>
               <p>2. Aislamiento: Ningún residente puede consultar información ni autorizados de otro apartamento (RN-B7).</p>
               <p>3. Derechos: El titular puede actualizar su contacto o revocar personas autorizadas en cualquier momento desde su portal.</p>

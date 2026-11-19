@@ -1,5 +1,5 @@
 /**
- * Paquetería (SCRUM-14, SCRUM-17, SCRUM-21).
+ * Paquetería multi-tenant (SCRUM-14, SCRUM-17, SCRUM-21).
  */
 import {
   addDoc,
@@ -49,11 +49,9 @@ export interface IncomingPackageInput {
   notes?: string
 }
 
-// ---------- SCRUM-14: registro de llegada ----------
-
-/** Registra un paquete en portería; queda 'Pendiente' con hora del servidor. */
 export async function registerIncomingPackage(
   db: Firestore,
+  condoId: string,
   porteroId: string,
   input: IncomingPackageInput,
 ): Promise<string> {
@@ -61,7 +59,7 @@ export async function registerIncomingPackage(
   const courier = requireNonEmpty(input.courier, 'Transportadora')
   const recipientName = requireNonEmpty(input.recipientName, 'Destinatario')
 
-  const apt = await getDoc(doc(db, 'apartments', apartmentId))
+  const apt = await getDoc(doc(db, 'condominiums', condoId, 'apartments', apartmentId))
   if (!apt.exists()) {
     throw new BusinessRuleError('not-found', 'El apartamento no existe. Revise torre y número.')
   }
@@ -79,44 +77,37 @@ export async function registerIncomingPackage(
   if (input.trackingNumber?.trim()) data.trackingNumber = input.trackingNumber.trim()
   if (input.notes?.trim()) data.notes = input.notes.trim()
 
-  const ref = await addDoc(collection(db, 'packages'), data)
+  const ref = await addDoc(collection(db, 'condominiums', condoId, 'packages'), data)
   return ref.id
 }
 
-// ---------- SCRUM-17: suscripciones en tiempo real (RNF-11) ----------
-
 function toPackages(docs: { id: string; data: (o?: object) => unknown }[]): Package[] {
-  // estimate: el turno que registra ve su paquete al instante, antes de que
-  // el servidor confirme la hora.
   return docs.map((d) => ({ id: d.id, ...(d.data({ serverTimestamps: 'estimate' }) as object) }) as Package)
 }
 
-/** Portería y administración: todos los paquetes pendientes, más recientes primero. */
 export function subscribeToPendingPackages(
   db: Firestore,
+  condoId: string,
   onChange: (packages: Package[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
   const q = query(
-    collection(db, 'packages'),
+    collection(db, 'condominiums', condoId, 'packages'),
     where('status', '==', 'Pendiente'),
     orderBy('receivedAt', 'desc'),
   )
   return onSnapshot(q, (snap) => onChange(toPackages(snap.docs)), onError)
 }
 
-/**
- * Residente: pendientes de su apartamento. El filtro por apartmentId es
- * obligatorio: sin él, firestore.rules rechaza la consulta.
- */
 export function subscribeToApartmentPackages(
   db: Firestore,
+  condoId: string,
   apartmentId: string,
   onChange: (packages: Package[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
   const q = query(
-    collection(db, 'packages'),
+    collection(db, 'condominiums', condoId, 'packages'),
     where('apartmentId', '==', apartmentId),
     where('status', '==', 'Pendiente'),
     orderBy('receivedAt', 'desc'),
@@ -124,18 +115,15 @@ export function subscribeToApartmentPackages(
   return onSnapshot(q, (snap) => onChange(toPackages(snap.docs)), onError)
 }
 
-/**
- * Residente: todos los paquetes de su apartamento (pendientes y entregados).
- * Se ordenan en cliente para no requerir índice compuesto adicional.
- */
 export function subscribeToAllApartmentPackages(
   db: Firestore,
+  condoId: string,
   apartmentId: string,
   onChange: (packages: Package[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
   const q = query(
-    collection(db, 'packages'),
+    collection(db, 'condominiums', condoId, 'packages'),
     where('apartmentId', '==', apartmentId),
   )
   return onSnapshot(q, (snap) => {
@@ -148,38 +136,32 @@ export function subscribeToAllApartmentPackages(
   }, onError)
 }
 
-/** Administración / Portería: histórico completo de paquetes. */
 export function subscribeToAllPackages(
   db: Firestore,
+  condoId: string,
   onChange: (packages: Package[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  const q = query(collection(db, 'packages'), orderBy('receivedAt', 'desc'))
+  const q = query(collection(db, 'condominiums', condoId, 'packages'), orderBy('receivedAt', 'desc'))
   return onSnapshot(q, (snap) => onChange(toPackages(snap.docs)), onError)
 }
 
-// ---------- SCRUM-21: entrega ----------
-
-/**
- * Entrega un paquete a quien presenta `receiverDocumentId`. Solo se entrega
- * a un residente o autorizado activo del apartamento (RN-B4); la transacción
- * evita que dos turnos entreguen el mismo paquete a la vez.
- */
 export async function deliverPackageTransaction(
   db: Firestore,
+  condoId: string,
   porteroId: string,
   packageId: string,
   receiverDocumentId: string,
   notes?: string,
 ): Promise<void> {
   const documentId = requireNonEmpty(receiverDocumentId, 'Documento de quien recibe')
-  const pkgRef = doc(db, 'packages', packageId)
+  const pkgRef = doc(db, 'condominiums', condoId, 'packages', packageId)
 
   const pkgSnap = await getDoc(pkgRef)
   if (!pkgSnap.exists()) throw new BusinessRuleError('not-found', 'El paquete no existe.')
   const apartmentId = pkgSnap.get('apartmentId') as string
 
-  const person = await findActiveAuthorizedByDocument(db, apartmentId, documentId)
+  const person = await findActiveAuthorizedByDocument(db, condoId, apartmentId, documentId)
   if (!person) {
     throw new BusinessRuleError(
       'permission-denied',
@@ -192,7 +174,7 @@ export async function deliverPackageTransaction(
     if (current.get('status') !== 'Pendiente') {
       throw new BusinessRuleError('failed-precondition', 'Este paquete ya fue entregado.')
     }
-    const authRef = doc(db, 'apartments', apartmentId, 'authorized', person.id)
+    const authRef = doc(db, 'condominiums', condoId, 'apartments', apartmentId, 'authorized', person.id)
     const auth = await tx.get(authRef)
     if (!auth.exists() || auth.get('isActive') !== true) {
       throw new BusinessRuleError('permission-denied', 'La autorización de esa persona ya no está activa.')

@@ -1,10 +1,5 @@
 /**
- * Servicio de analítica, agregaciones e indicadores mensuales para el consejo
- * de administración (SCRUM-39, RF-18, RN-B5).
- *
- * Opera en el plan Spark con consultas acotadas y `getCountFromServer()` de
- * Firestore. Las reglas de `firestore.rules` garantizan que solo el rol
- * `administradora` pueda ejecutar estas agregaciones globales.
+ * Servicio de analítica, agregaciones e indicadores mensuales — Multi-Tenant (SCRUM-39, RF-18, RN-B5).
  */
 import {
   collection,
@@ -69,11 +64,7 @@ function validateMonthYear(month: number, year: number): void {
   }
 }
 
-/**
- * Rango UTC correspondiente al mes local de Colombia (UTC-5, sin horario de verano).
- */
 function monthUtcRange(month: number, year: number): { start: Date; end: Date } {
-  // 00:00:00 COT == 05:00:00 UTC
   const start = new Date(Date.UTC(year, month - 1, 1, 5, 0, 0, 0))
   const end = new Date(Date.UTC(year, month, 1, 5, 0, 0, 0))
   return { start, end }
@@ -91,13 +82,9 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
-/**
- * Paquetes con más de `thresholdDays` días (15 por defecto, RN-B5) en portería.
- * Usa filtro indexado (`status == 'Pendiente'` y `receivedAt <= cutoff`) para
- * evitar escanear paquetes entregados o recientes.
- */
 export async function getOverduePackages(
   db: Firestore,
+  condoId: string,
   now: Date = new Date(),
   thresholdDays: number = OVERDUE_PACKAGE_DAYS,
 ): Promise<OverduePackageItem[]> {
@@ -105,7 +92,7 @@ export async function getOverduePackages(
   const cutoffTs = Timestamp.fromMillis(cutoffMs)
 
   const q = query(
-    collection(db, 'packages'),
+    collection(db, 'condominiums', condoId, 'packages'),
     where('status', '==', 'Pendiente'),
     where('receivedAt', '<=', cutoffTs),
   )
@@ -130,12 +117,9 @@ export async function getOverduePackages(
     .sort((a, b) => b.hoursPending - a.hoursPending)
 }
 
-/**
- * Indicadores mensuales de paquetería: recibidos, entregados, pendientes,
- * rezagados > 15 días (RN-B5) y tiempo promedio de retiro en horas.
- */
 export async function getMonthlyPackageMetrics(
   db: Firestore,
+  condoId: string,
   month: number,
   year: number,
   now: Date = new Date(),
@@ -144,7 +128,7 @@ export async function getMonthlyPackageMetrics(
   const { start, end } = monthUtcRange(month, year)
   const startTs = Timestamp.fromDate(start)
   const endTs = Timestamp.fromDate(end)
-  const pkgsCol = collection(db, 'packages')
+  const pkgsCol = collection(db, 'condominiums', condoId, 'packages')
 
   const receivedInMonthQ = query(
     pkgsCol,
@@ -193,11 +177,9 @@ export async function getMonthlyPackageMetrics(
   }
 }
 
-/**
- * Estadísticas mensuales de reservas por estado y zona común más solicitada.
- */
 export async function getReservationStats(
   db: Firestore,
+  condoId: string,
   month: number,
   year: number,
 ): Promise<ReservationStats> {
@@ -205,7 +187,7 @@ export async function getReservationStats(
   const { startDate, endDate } = monthDatePrefix(month, year)
 
   const q = query(
-    collection(db, 'reservations'),
+    collection(db, 'condominiums', condoId, 'reservations'),
     where('date', '>=', startDate),
     where('date', '<=', endDate),
   )
@@ -242,15 +224,13 @@ export async function getReservationStats(
   }
 }
 
-/**
- * Distribución de PQRS por estado/categoría y tiempo promedio de resolución en horas.
- */
 export async function getPqrsResolutionStats(
   db: Firestore,
+  condoId: string,
   month?: number,
   year?: number,
 ): Promise<PqrsResolutionStats> {
-  const pqrsCol = collection(db, 'pqrs')
+  const pqrsCol = collection(db, 'condominiums', condoId, 'pqrs')
   let q = query(pqrsCol)
 
   if (month !== undefined || year !== undefined) {

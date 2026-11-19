@@ -1,6 +1,7 @@
 /**
- * Usuarios y roles (SCRUM-6). El rol vive en users/{uid} y lo protege
- * firestore.rules: nadie puede cambiarse su propio rol, estado ni apartamento.
+ * Usuarios y roles (SCRUM-6 + Multi-Tenancy). El rol y `condominiumId` viven en
+ * `users/{uid}` y los protege `firestore.rules`: nadie puede cambiarse de conjunto
+ * ni elevarse su rol por su cuenta.
  */
 import {
   arrayRemove,
@@ -10,11 +11,11 @@ import {
   doc,
   getDoc,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
   type Firestore,
   type Unsubscribe,
@@ -30,6 +31,7 @@ export interface UserProfile {
   displayName: string
   phone?: string
   role: Role
+  condominiumId?: string | null
   unitId?: string
   towerId?: string
   isActive: boolean
@@ -37,7 +39,7 @@ export interface UserProfile {
 
 /**
  * Crea el perfil propio tras registrarse en Firebase Auth. Siempre entra
- * como residente activo y sin apartamento; la administradora lo asigna.
+ * como residente activo, sin conjunto y sin apartamento.
  */
 export async function registerOwnProfile(
   db: Firestore,
@@ -51,6 +53,7 @@ export async function registerOwnProfile(
     displayName: user.displayName ?? '',
     phone: user.phone?.trim() ?? '',
     role: 'residente',
+    condominiumId: null,
     isActive: true,
     createdAt: serverTimestamp(),
   })
@@ -72,14 +75,19 @@ export function subscribeToOwnProfile(
   }, onError)
 }
 
+/** Administradora: lista únicamente los usuarios pertenecientes a SU conjunto. */
 export function subscribeToUsers(
   db: Firestore,
+  condoId: string,
   onChange: (users: UserProfile[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  const q = query(collection(db, 'users'), orderBy('email', 'asc'))
+  const q = query(collection(db, 'users'), where('condominiumId', '==', condoId))
   return onSnapshot(q, (snap) => {
-    onChange(snap.docs.map((d) => d.data() as UserProfile))
+    const list = snap.docs
+      .map((d) => d.data() as UserProfile)
+      .sort((a, b) => (a.email || '').localeCompare(b.email || ''))
+    onChange(list)
   }, onError)
 }
 
@@ -96,19 +104,20 @@ export async function updateOwnContact(
 }
 
 /**
- * Administradora: liga un residente a su apartamento. En un solo batch
- * actualiza su perfil, residentUids del apartamento y lo registra como
+ * Administradora: liga un residente de su conjunto a su apartamento. En un solo
+ * batch actualiza su perfil, residentUids del apartamento y lo registra como
  * persona habilitada para recibir paquetes (RN-B4).
  */
 export async function assignResidentToApartment(
   db: Firestore,
+  condoId: string,
   input: { userId: string; apartmentId: string; fullName: string; documentId: string },
 ): Promise<void> {
   const fullName = requireNonEmpty(input.fullName, 'Nombre')
   const documentId = requireNonEmpty(input.documentId, 'Documento')
 
   const userRef = doc(db, 'users', input.userId)
-  const aptRef = doc(db, 'apartments', input.apartmentId)
+  const aptRef = doc(db, 'condominiums', condoId, 'apartments', input.apartmentId)
   const [userSnap, aptSnap] = await Promise.all([getDoc(userRef), getDoc(aptRef)])
   if (!userSnap.exists()) throw new BusinessRuleError('not-found', 'El usuario no existe.')
   if (!aptSnap.exists()) throw new BusinessRuleError('not-found', 'El apartamento no existe.')
@@ -121,7 +130,7 @@ export async function assignResidentToApartment(
     towerId: aptSnap.get('towerId'),
   })
   batch.update(aptRef, { residentUids: arrayUnion(input.userId) })
-  const authRef = doc(db, 'apartments', input.apartmentId, 'authorized', input.userId)
+  const authRef = doc(db, 'condominiums', condoId, 'apartments', input.apartmentId, 'authorized', input.userId)
   const authSnap = await getDoc(authRef)
   batch.set(authRef, {
     id: input.userId,
@@ -130,19 +139,19 @@ export async function assignResidentToApartment(
     phone: authSnap.get('phone') ?? '',
     relation: 'residente',
     isActive: true,
-    // registeredAt no puede cambiar en una actualización (firestore.rules).
     registeredAt: authSnap.exists() ? authSnap.get('registeredAt') : serverTimestamp(),
   })
   if (previousUnit && previousUnit !== input.apartmentId) {
-    batch.update(doc(db, 'apartments', previousUnit), { residentUids: arrayRemove(input.userId) })
-    batch.delete(doc(db, 'apartments', previousUnit, 'authorized', input.userId))
+    batch.update(doc(db, 'condominiums', condoId, 'apartments', previousUnit), { residentUids: arrayRemove(input.userId) })
+    batch.delete(doc(db, 'condominiums', condoId, 'apartments', previousUnit, 'authorized', input.userId))
   }
   await batch.commit()
 }
 
-/** Administradora: asigna rol de portero o administradora (sin apartamento). */
+/** Administradora: asigna rol de portero o administradora dentro de su conjunto. */
 export async function setStaffRole(
   db: Firestore,
+  condoId: string,
   userId: string,
   role: Exclude<Role, 'residente'>,
 ): Promise<void> {
@@ -157,13 +166,13 @@ export async function setStaffRole(
   const batch = writeBatch(db)
   batch.update(userRef, { role, unitId: deleteField(), towerId: deleteField() })
   if (previousUnit) {
-    batch.update(doc(db, 'apartments', previousUnit), { residentUids: arrayRemove(userId) })
-    batch.delete(doc(db, 'apartments', previousUnit, 'authorized', userId))
+    batch.update(doc(db, 'condominiums', condoId, 'apartments', previousUnit), { residentUids: arrayRemove(userId) })
+    batch.delete(doc(db, 'condominiums', condoId, 'apartments', previousUnit, 'authorized', userId))
   }
   await batch.commit()
 }
 
-/** Administradora: activa o desactiva una cuenta (RF-02). */
+/** Administradora: activa o desactiva una cuenta de su conjunto (RF-02). */
 export async function setUserActive(db: Firestore, userId: string, isActive: boolean): Promise<void> {
   await updateDoc(doc(db, 'users', userId), { isActive })
 }

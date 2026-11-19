@@ -1,10 +1,5 @@
 /**
- * Radicación y ciclo de vida de PQRS (SCRUM-31, SCRUM-35).
- *
- * - Radicado consecutivo atómico `PQ-YYYY-XXXX` respaldado por `counters/pqrs`.
- * - Transiciones controladas (`Radicada` -> `En gestión` -> `Resuelta`) con
- *   respuesta oficial obligatoria >= 10 caracteres (RN-B6) y auditoría
- *   inmutable en `pqrs/{pqrsId}/history/{historyId}`.
+ * Radicación y ciclo de vida de PQRS — Multi-Tenant (SCRUM-31, SCRUM-35).
  */
 import {
   collection,
@@ -86,14 +81,9 @@ function isValidCategory(value: unknown): value is PqrsCategory {
   return typeof value === 'string' && (PQRS_CATEGORIES as readonly string[]).includes(value)
 }
 
-// ---------- SCRUM-31: radicación atómica ----------
-
-/**
- * Lee e incrementa `counters/pqrs` en +1 y crea el documento PQRS en una única
- * transacción atómica, garantizando radicados únicos y consecutivos sin Cloud Functions.
- */
 export async function filePqrsTransaction(
   db: Firestore,
+  condoId: string,
   input: FilePqrsInput,
 ): Promise<{ id: string; ticketNumber: string }> {
   const apartmentId = requireNonEmpty(input.apartmentId, 'Apartamento')
@@ -108,12 +98,12 @@ export async function filePqrsTransaction(
     )
   }
 
-  const counterRef = doc(db, 'counters', 'pqrs')
+  const counterRef = doc(db, 'condominiums', condoId, 'counters', 'pqrs')
   const fallbackYear = input.year ?? new Date().getFullYear()
   const maxAttempts = 5
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const pqrsRef = doc(collection(db, 'pqrs'))
+    const pqrsRef = doc(collection(db, 'condominiums', condoId, 'pqrs'))
     let observedSeq: number | null = null
 
     try {
@@ -159,9 +149,6 @@ export async function filePqrsTransaction(
       return { id: pqrsRef.id, ticketNumber }
     } catch (err) {
       const code = (err as { code?: string }).code
-      // En Firestore, si dos transacciones leen el mismo sequence y una gana,
-      // las reglas rechazan la segunda (sequence + 1 ya no coincide) antes del
-      // conflicto ABORTED. Reintentamos solo si realmente hubo carrera en el contador.
       if ((code === 'permission-denied' || code === 'aborted') && observedSeq !== null && attempt < maxAttempts) {
         continue
       }
@@ -172,15 +159,9 @@ export async function filePqrsTransaction(
   throw new BusinessRuleError('aborted', 'No se pudo asignar un radicado único tras varios intentos concurrentes.')
 }
 
-// ---------- SCRUM-35: ciclo de vida e historial inmutable (RN-B6) ----------
-
-/**
- * Transiciona el estado de un PQRS (`Radicada` -> `En gestión` / `Resuelta`,
- * o `En gestión` -> `Resuelta`) y registra la entrada inmutable en `history`
- * dentro de la misma transacción.
- */
 export async function transitionPqrsStatus(
   db: Firestore,
+  condoId: string,
   adminUid: string,
   input: TransitionPqrsInput,
 ): Promise<void> {
@@ -200,8 +181,8 @@ export async function transitionPqrsStatus(
     )
   }
 
-  const pqrsRef = doc(db, 'pqrs', pqrsId)
-  const historyRef = doc(collection(db, 'pqrs', pqrsId, 'history'))
+  const pqrsRef = doc(db, 'condominiums', condoId, 'pqrs', pqrsId)
+  const historyRef = doc(collection(db, 'condominiums', condoId, 'pqrs', pqrsId, 'history'))
 
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(pqrsRef)
@@ -241,42 +222,40 @@ export async function transitionPqrsStatus(
   })
 }
 
-// ---------- Suscripciones en tiempo real ----------
-
 function toPqrsList(docs: { id: string; data: (o?: object) => unknown }[]): PqrsTicket[] {
   return docs
     .map((d) => ({ id: d.id, ...(d.data({ serverTimestamps: 'estimate' }) as object) }) as PqrsTicket)
     .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0))
 }
 
-/** Residente: PQRS de su apartamento (el filtro por apartmentId es exigido por firestore.rules). */
 export function subscribeToApartmentPqrs(
   db: Firestore,
+  condoId: string,
   apartmentId: string,
   onChange: (items: PqrsTicket[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  const q = query(collection(db, 'pqrs'), where('apartmentId', '==', apartmentId))
+  const q = query(collection(db, 'condominiums', condoId, 'pqrs'), where('apartmentId', '==', apartmentId))
   return onSnapshot(q, (snap) => onChange(toPqrsList(snap.docs)), onError)
 }
 
-/** Administración: todas las PQRS del conjunto. */
 export function subscribeToAllPqrs(
   db: Firestore,
+  condoId: string,
   onChange: (items: PqrsTicket[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  return onSnapshot(collection(db, 'pqrs'), (snap) => onChange(toPqrsList(snap.docs)), onError)
+  return onSnapshot(collection(db, 'condominiums', condoId, 'pqrs'), (snap) => onChange(toPqrsList(snap.docs)), onError)
 }
 
-/** Línea de tiempo inmutable de una PQRS ordenada cronológicamente. */
 export function subscribeToPqrsHistory(
   db: Firestore,
+  condoId: string,
   pqrsId: string,
   onChange: (entries: PqrsHistoryEntry[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  const q = query(collection(db, 'pqrs', pqrsId, 'history'), orderBy('changedAt', 'asc'))
+  const q = query(collection(db, 'condominiums', condoId, 'pqrs', pqrsId, 'history'), orderBy('changedAt', 'asc'))
   return onSnapshot(
     q,
     (snap) => {
